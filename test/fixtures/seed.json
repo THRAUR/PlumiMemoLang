@@ -1,0 +1,75 @@
+{
+  "lessons": [
+    {
+      "title": "Greetings", "titleZh": "打招呼", "classDate": "2026-09-04",
+      "summary": "First class: saying hello and thank you, asking politely, and the words for teacher and student.",
+      "sections": [
+        { "kind": "vocab", "title": "Saying hello", "titleZh": "問候", "body": "你好 works at any time of day. 早安 is only for the morning.\n- 你好 — hello\n- 謝謝 — thank you\n- 再見 — goodbye" },
+        { "kind": "tip", "title": "Asking politely", "titleZh": "請問", "body": "Start a question to a stranger with **請問**. It softens anything that follows." }
+      ],
+      "grammar": [],
+      "dialogue": [
+        { "speaker": "A", "zh": "你好！", "pinyin": "nǐ hǎo", "zhuyin": "ㄋㄧˇ ㄏㄠˇ", "translation": "Hello!" },
+        { "speaker": "B", "zh": "你好，請問你是老師嗎？", "pinyin": "nǐ hǎo, qǐng wèn nǐ shì lǎo shī ma", "zhuyin": "ㄋㄧˇ ㄏㄠˇ，ㄑㄧㄥˇ ㄨㄣˋ ㄋㄧˇ ㄕˋ ㄌㄠˇ ㄕ ˙ㄇㄚ", "translation": "Hello, excuse me, are you the teacher?" },
+        { "speaker": "A", "zh": "不是，我是學生。", "pinyin": "bú shì, wǒ shì xué shēng", "zhuyin": "ㄅㄨˊ ㄕˋ，ㄨㄛˇ ㄕˋ ㄒㄩㄝˊ ㄕㄥ", "translation": "No, I am a student." }
+      ],
+      "words": ["你好", "謝謝", "再見", "請問", "老師", "學生"]
+    },
+    {
+      "title": "Ordering drinks", "titleZh": "點飲料", "classDate": "2026-09-11",
+      "summary": "Ordering at a drink stand, asking the price, and comparing two things with 比.",
+      "sections": [
+        { "kind": "vocab", "title": "At the counter", "titleZh": "櫃檯", "body": "- 我要一杯咖啡 — I want a cup of coffee\n- 這個多少錢？ — how much is this?" },
+        { "kind": "grammar", "title": "Comparing with 比", "titleZh": "比較句", "body": "A 比 B + adjective: **茶比咖啡便宜** — tea is cheaper than coffee." },
+        { "kind": "culture", "title": "Drink stands", "titleZh": "飲料店", "body": "Sweetness (甜度) and ice (冰塊) are ordered separately: 半糖少冰 is half sugar, less ice." }
+      ],
+      "grammar": [
+        { "pattern": "A 比 B + adj", "explanation": "Put 比 between the two things being compared; the adjective comes last and never takes 很.",
+          "examples": [
+            { "zh": "茶比咖啡便宜。", "pinyin": "chá bǐ kā fēi pián yi", "zhuyin": "ㄔㄚˊ ㄅㄧˇ ㄎㄚ ㄈㄟ ㄆㄧㄢˊ ˙ㄧ", "translation": "Tea is cheaper than coffee." },
+            { "zh": "捷運比公車快。", "pinyin": "jié yùn bǐ gōng chē kuài", "zhuyin": "ㄐㄧㄝˊ ㄩㄣˋ ㄅㄧˇ ㄍㄨㄥ ㄔㄜ ㄎㄨㄞˋ", "translation": "The MRT is faster than the bus." }
+          ] }
+      ],
+      "dialogue": [
+        { "speaker": "店員", "zh": "你好，要喝什麼？", "pinyin": "nǐ hǎo, yào hē shén me", "zhuyin": "ㄋㄧˇ ㄏㄠˇ，ㄧㄠˋ ㄏㄜ ㄕㄣˊ ˙ㄇㄜ", "translation": "Hello, what would you like to drink?" },
+        { "speaker": "我", "zh": "我要一杯咖啡。多少錢？", "pinyin": "wǒ yào yì bēi kā fēi. duō shǎo qián", "zhuyin": "ㄨㄛˇ ㄧㄠˋ ㄧˋ ㄅㄟ ㄎㄚ ㄈㄟ。ㄉㄨㄛ ㄕㄠˇ ㄑㄧㄢˊ", "translation": "I want a cup of coffee. How much?" },
+        { "speaker": "店員", "zh": "六十塊。", "pinyin": "liù shí kuài", "zhuyin": "ㄌㄧㄡˋ ㄕˊ ㄎㄨㄞˋ", "translation": "Sixty dollars." }
+      ],
+      "words": ["喜歡", "茶", "咖啡", "便當", "捷運", "多少錢", "吃", "明天", "比", "便宜"]
+    }
+  ],
+  "words": [
+    { "hanzi": "你好", "pinyin": "nǐ hǎo", "zhuyin": "ㄋㄧˇ ㄏㄠˇ", "meaning": "hello", "meaningNative": "bonjour", "pos": "expr", "type": "phrase", "tags": ["greeting"],
+      "examples": [{ "zh": "你好，我是 Arthur。", "pinyin": "nǐ hǎo, wǒ shì Arthur", "zhuyin": "ㄋㄧˇ ㄏㄠˇ，ㄨㄛˇ ㄕˋ Arthur", "translation": "Hello, I am Arthur." }] },
+    { "hanzi": "謝謝", "pinyin": "xiè xie", "zhuyin": "ㄒㄧㄝˋ ˙ㄒㄧㄝ", "meaning": "thank you", "meaningNative": "merci", "pos": "expr", "type": "phrase", "tags": ["greeting"],
+      "examples": [{ "zh": "謝謝你的幫忙。", "pinyin": "xiè xie nǐ de bāng máng", "zhuyin": "ㄒㄧㄝˋ ˙ㄒㄧㄝ ㄋㄧˇ ˙ㄉㄜ ㄅㄤ ㄇㄤˊ", "translation": "Thanks for your help." }] },
+    { "hanzi": "再見", "pinyin": "zài jiàn", "zhuyin": "ㄗㄞˋ ㄐㄧㄢˋ", "meaning": "goodbye", "meaningNative": "au revoir", "pos": "expr", "type": "phrase", "tags": ["greeting"],
+      "examples": [{ "zh": "明天見，再見！", "pinyin": "míng tiān jiàn, zài jiàn", "zhuyin": "ㄇㄧㄥˊ ㄊㄧㄢ ㄐㄧㄢˋ，ㄗㄞˋ ㄐㄧㄢˋ", "translation": "See you tomorrow, bye!" }] },
+    { "hanzi": "請問", "pinyin": "qǐng wèn", "zhuyin": "ㄑㄧㄥˇ ㄨㄣˋ", "meaning": "excuse me, may I ask", "meaningNative": "excusez-moi", "pos": "expr", "type": "phrase", "tags": ["polite", "question"],
+      "examples": [{ "zh": "請問廁所在哪裡？", "pinyin": "qǐng wèn cè suǒ zài nǎ lǐ", "zhuyin": "ㄑㄧㄥˇ ㄨㄣˋ ㄘㄜˋ ㄙㄨㄛˇ ㄗㄞˋ ㄋㄚˇ ㄌㄧˇ", "translation": "Excuse me, where is the restroom?" }] },
+    { "hanzi": "老師", "pinyin": "lǎo shī", "zhuyin": "ㄌㄠˇ ㄕ", "meaning": "teacher", "meaningNative": "professeur", "pos": "n", "type": "word", "tags": ["people", "school"],
+      "examples": [{ "zh": "老師早！", "pinyin": "lǎo shī zǎo", "zhuyin": "ㄌㄠˇ ㄕ ㄗㄠˇ", "translation": "Good morning, teacher!" }] },
+    { "hanzi": "學生", "pinyin": "xué shēng", "zhuyin": "ㄒㄩㄝˊ ㄕㄥ", "meaning": "student", "meaningNative": "étudiant", "pos": "n", "type": "word", "tags": ["people", "school"],
+      "examples": [{ "zh": "我是學生。", "pinyin": "wǒ shì xué shēng", "zhuyin": "ㄨㄛˇ ㄕˋ ㄒㄩㄝˊ ㄕㄥ", "translation": "I am a student." }] },
+    { "hanzi": "喜歡", "pinyin": "xǐ huān", "zhuyin": "ㄒㄧˇ ㄏㄨㄢ", "meaning": "to like", "meaningNative": "aimer", "pos": "v", "type": "word", "tags": ["feelings"],
+      "examples": [{ "zh": "我喜歡喝茶。", "pinyin": "wǒ xǐ huān hē chá", "zhuyin": "ㄨㄛˇ ㄒㄧˇ ㄏㄨㄢ ㄏㄜ ㄔㄚˊ", "translation": "I like drinking tea." }] },
+    { "hanzi": "茶", "pinyin": "chá", "zhuyin": "ㄔㄚˊ", "meaning": "tea", "meaningNative": "thé", "pos": "n", "type": "character", "tags": ["food", "drink"],
+      "examples": [{ "zh": "這杯茶很好喝。", "pinyin": "zhè bēi chá hěn hǎo hē", "zhuyin": "ㄓㄜˋ ㄅㄟ ㄔㄚˊ ㄏㄣˇ ㄏㄠˇ ㄏㄜ", "translation": "This cup of tea is delicious." }] },
+    { "hanzi": "咖啡", "pinyin": "kā fēi", "zhuyin": "ㄎㄚ ㄈㄟ", "meaning": "coffee", "meaningNative": "café", "pos": "n", "type": "word", "tags": ["food", "drink"],
+      "examples": [{ "zh": "我要一杯咖啡。", "pinyin": "wǒ yào yì bēi kā fēi", "zhuyin": "ㄨㄛˇ ㄧㄠˋ ㄧˋ ㄅㄟ ㄎㄚ ㄈㄟ", "translation": "I want a cup of coffee." }] },
+    { "hanzi": "便當", "pinyin": "biàn dāng", "zhuyin": "ㄅㄧㄢˋ ㄉㄤ", "meaning": "lunch box (Taiwan)", "meaningNative": "bento", "pos": "n", "type": "word", "tags": ["food", "taiwan"],
+      "examples": [{ "zh": "中午我吃便當。", "pinyin": "zhōng wǔ wǒ chī biàn dāng", "zhuyin": "ㄓㄨㄥ ㄨˇ ㄨㄛˇ ㄔ ㄅㄧㄢˋ ㄉㄤ", "translation": "At noon I eat a lunch box." }] },
+    { "hanzi": "捷運", "pinyin": "jié yùn", "zhuyin": "ㄐㄧㄝˊ ㄩㄣˋ", "meaning": "MRT, metro (Taiwan)", "meaningNative": "métro", "pos": "n", "type": "word", "tags": ["transport", "taiwan"],
+      "examples": [{ "zh": "我坐捷運去學校。", "pinyin": "wǒ zuò jié yùn qù xué xiào", "zhuyin": "ㄨㄛˇ ㄗㄨㄛˋ ㄐㄧㄝˊ ㄩㄣˋ ㄑㄩˋ ㄒㄩㄝˊ ㄒㄧㄠˋ", "translation": "I take the MRT to school." }] },
+    { "hanzi": "多少錢", "pinyin": "duō shǎo qián", "zhuyin": "ㄉㄨㄛ ㄕㄠˇ ㄑㄧㄢˊ", "meaning": "how much (money)?", "meaningNative": "combien ?", "pos": "expr", "type": "phrase", "tags": ["shopping", "question"],
+      "examples": [{ "zh": "這個多少錢？", "pinyin": "zhè ge duō shǎo qián", "zhuyin": "ㄓㄜˋ ˙ㄍㄜ ㄉㄨㄛ ㄕㄠˇ ㄑㄧㄢˊ", "translation": "How much is this?" }] },
+    { "hanzi": "吃", "pinyin": "chī", "zhuyin": "ㄔ", "meaning": "to eat", "meaningNative": "manger", "pos": "v", "type": "character", "tags": ["food"],
+      "examples": [{ "zh": "你吃飯了嗎？", "pinyin": "nǐ chī fàn le ma", "zhuyin": "ㄋㄧˇ ㄔ ㄈㄢˋ ˙ㄌㄜ ˙ㄇㄚ", "translation": "Have you eaten?" }] },
+    { "hanzi": "明天", "pinyin": "míng tiān", "zhuyin": "ㄇㄧㄥˊ ㄊㄧㄢ", "meaning": "tomorrow", "meaningNative": "demain", "pos": "n", "type": "word", "tags": ["time"],
+      "examples": [{ "zh": "明天見！", "pinyin": "míng tiān jiàn", "zhuyin": "ㄇㄧㄥˊ ㄊㄧㄢ ㄐㄧㄢˋ", "translation": "See you tomorrow!" }] },
+    { "hanzi": "比", "pinyin": "bǐ", "zhuyin": "ㄅㄧˇ", "meaning": "than (comparison)", "meaningNative": "que (comparaison)", "pos": "prep", "type": "grammar", "tags": ["grammar"],
+      "examples": [{ "zh": "茶比咖啡便宜。", "pinyin": "chá bǐ kā fēi pián yi", "zhuyin": "ㄔㄚˊ ㄅㄧˇ ㄎㄚ ㄈㄟ ㄆㄧㄢˊ ˙ㄧ", "translation": "Tea is cheaper than coffee." }] },
+    { "hanzi": "便宜", "pinyin": "pián yi", "zhuyin": "ㄆㄧㄢˊ ˙ㄧ", "meaning": "cheap", "meaningNative": "bon marché", "pos": "adj", "type": "word", "tags": ["shopping"],
+      "examples": [{ "zh": "夜市的東西很便宜。", "pinyin": "yè shì de dōng xi hěn pián yi", "zhuyin": "ㄧㄝˋ ㄕˋ ˙ㄉㄜ ㄉㄨㄥ ˙ㄒㄧ ㄏㄣˇ ㄆㄧㄢˊ ˙ㄧ", "translation": "Things at the night market are cheap." }] }
+  ]
+}

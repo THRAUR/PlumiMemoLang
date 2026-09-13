@@ -1,0 +1,16 @@
+{
+  "name": "plumimemolang",
+  "version": "0.1.0",
+  "description": "A local Traditional Chinese study desk: memo cards, a scored dictionary, challenges, and AI lesson cards built from your own class notes.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

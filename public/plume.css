@@ -1,0 +1,399 @@
+/* ============================================================
+   PLUME — PlumiMemoLang's design system.
+   ============================================================
+   A quiet, paper-white early-Macintosh desk that comes alive: mono
+   neutrals, crisp 1px hairlines, pixel display type, hard-offset
+   shadows, ONE terracotta accent — and Plumi, the pixel bird, as
+   the study buddy. The vocabulary is the same one PlumiChat and the
+   PlumiBot site use; the values below are the measured Plume tokens.
+
+   Loaded FIRST, before app.css and the per-view stylesheets. It owns:
+     1. the four Latin typefaces (self-hosted) + the CJK stack
+     2. the palette: paper (default) and phosphor (dark), under the
+        variable names the rest of the app uses
+     3. the primitives every screen shares: the Mac window, the
+        eyebrow, the tag, the focus ring, the boot wink.
+
+   ONE ACCENT RULE: terracotta is the only chromatic colour and it
+   appears once per screen region (the primary action, the current
+   node, the streak flame). Sage / amber / brick are STATES —
+   correct, due, wrong — never decoration.
+   ============================================================ */
+
+/* ---------- 1. typefaces ----------
+   latin + latin-ext only. CJK is deliberately NOT a webfont: Traditional
+   Chinese renders in the platform face (PingFang on iOS, JhengHei on
+   Windows, Noto Sans CJK on Linux) through --font-zh, which is both
+   correct (Taiwan glyph forms) and free. */
+@font-face {
+  font-family: "Pixelify Sans"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url(/fonts/pixelify-sans-normal-400-700-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Pixelify Sans"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url(/fonts/pixelify-sans-normal-400-700-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Silkscreen"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(/fonts/silkscreen-normal-400-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Silkscreen"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(/fonts/silkscreen-normal-400-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Silkscreen"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url(/fonts/silkscreen-normal-700-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Silkscreen"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url(/fonts/silkscreen-normal-700-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Karla"; font-style: normal; font-weight: 300 800; font-display: swap;
+  src: url(/fonts/karla-normal-300-800-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Karla"; font-style: normal; font-weight: 300 800; font-display: swap;
+  src: url(/fonts/karla-normal-300-800-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Karla"; font-style: italic; font-weight: 300 800; font-display: swap;
+  src: url(/fonts/karla-italic-300-800-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Karla"; font-style: italic; font-weight: 300 800; font-display: swap;
+  src: url(/fonts/karla-italic-300-800-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url(/fonts/jetbrains-mono-normal-400-700-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url(/fonts/jetbrains-mono-normal-400-700-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+
+/* ---------- 2. palette ----------
+   PAPER is the default. The accent splits in two on paper: #E0915E is a
+   FILL only (it fails AA as text), #894728 is the text/link colour —
+   dark enough to clear AA on --surface-3 and on its own tint. */
+:root {
+  /* — surfaces, light to dark — */
+  --bg: #F8F6F1;            /* the paper */
+  --surface: #FFFFFF;       /* cards, rows, windows */
+  --surface-2: #F1EDE4;     /* one step down: hover, title bars, chips */
+  --surface-3: #E4DED1;     /* two steps: pressed, thumbs */
+  --sunk: #EFEBE2;          /* recessed wells, meters */
+  --panel-bg: #FFFFFF;      /* a window's body */
+  --bar-bg: rgba(248, 246, 241, 0.86);
+
+  /* — hairlines — */
+  --line: #E2DDD2;
+  --line-strong: #CFC8B8;
+
+  /* — ink — */
+  --text: #1A1813;
+  --muted: #55514A;
+  --faint: #7D786E;
+
+  /* — the one accent — */
+  --accent: #E0915E;        /* FILLS */
+  --accent-text: #894728;   /* TEXT and links */
+  --accent-dim: rgba(224, 145, 94, 0.16);
+  --accent-line: rgba(168, 87, 49, 0.40);
+  --on-accent: #2A1A10;
+
+  /* — states, never brand — */
+  --green: #5F7D5C;                       /* correct, mastered */
+  --green-dim: rgba(95, 125, 92, 0.13);
+  --green-line: rgba(95, 125, 92, 0.34);
+  --warn: #9A6612;                        /* due, overdue */
+  --warn-dim: rgba(154, 102, 18, 0.12);
+  --warn-line: rgba(154, 102, 18, 0.34);
+  --error: #B4443C;                       /* wrong, lapsed, destructive */
+  --error-dim: rgba(180, 68, 60, 0.10);
+  --error-line: rgba(180, 68, 60, 0.32);
+  --on-danger: #FFF6F0;
+
+  /* — type — */
+  --font-display: "Pixelify Sans", ui-monospace, monospace;
+  --font-label: "Silkscreen", "Pixelify Sans", ui-monospace, monospace;
+  --font-body: "Karla", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Traditional Chinese, Taiwan forms first. Also used for 注音 so every
+     bopomofo glyph and tone mark comes from the same face. */
+  --font-zh: "PingFang TC", "Noto Sans CJK TC", "Noto Sans TC", "Source Han Sans TC", "Microsoft JhengHei", "微軟正黑體", "Heiti TC", "Apple LiGothic", sans-serif;
+
+  /* — shape: sharp UI, rounded windows — */
+  --r-sm: 2px;
+  --r-md: 4px;
+  --r-win: 9px;
+  --bw: 1px;
+  --bw-strong: 1.5px;
+
+  /* — hard-offset shadows, no blur — */
+  --shadow-sm: 2px 2px 0 rgba(26, 24, 19, 0.10);
+  --shadow-md: 3px 3px 0 rgba(26, 24, 19, 0.14);
+  --shadow-lg: 5px 5px 0 rgba(26, 24, 19, 0.16);
+  --shadow-win: 0 10px 30px -18px rgba(26, 24, 19, 0.45);
+
+  /* — motion — */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 280ms;
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* — layout units — */
+  --row-h: 44px;
+  --head-h: 56px;
+  --rail-w: 232px;
+  --tab-h: 62px;
+  --content-w: 820px;
+}
+
+/* PHOSPHOR — Plume's dark mode. Accent stays terracotta, one step warmer. */
+html[data-theme="dark"] {
+  --bg: #141210;
+  --surface: #1E1B16;
+  --surface-2: #262119;
+  --surface-3: #322C22;
+  --sunk: #0F0D0B;
+  --panel-bg: #1A1713;
+  --bar-bg: rgba(20, 18, 16, 0.86);
+
+  --line: #2A2620;
+  --line-strong: #3A352C;
+
+  --text: #F2ECDD;
+  --muted: #C7BFAE;
+  --faint: #8E8677;
+
+  --accent: #E8A06F;
+  --accent-text: #E8A06F;
+  --accent-dim: rgba(232, 160, 111, 0.14);
+  --accent-line: rgba(232, 160, 111, 0.42);
+  --on-accent: #1A1006;
+
+  --green: #9DB79A;
+  --green-dim: rgba(157, 183, 154, 0.14);
+  --green-line: rgba(157, 183, 154, 0.36);
+  --warn: #E0A94E;
+  --warn-dim: rgba(224, 169, 78, 0.14);
+  --warn-line: rgba(224, 169, 78, 0.4);
+  --error: #E2726A;
+  --error-dim: rgba(226, 114, 106, 0.13);
+  --error-line: rgba(226, 114, 106, 0.38);
+  --on-danger: #2A0E0B;
+
+  --shadow-sm: 2px 2px 0 rgba(0, 0, 0, 0.45);
+  --shadow-md: 3px 3px 0 rgba(0, 0, 0, 0.55);
+  --shadow-lg: 5px 5px 0 rgba(0, 0, 0, 0.6);
+  --shadow-win: 0 14px 34px -18px rgba(0, 0, 0, 0.85);
+}
+
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+
+/* ---------- 3. base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+/* Chinese never inherits Karla; the platform CJK face renders it. */
+[lang="zh-Hant"], .zh { font-family: var(--font-zh); }
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+img, svg { display: block; max-width: 100%; }
+h1, h2, h3, h4, .display { font-family: var(--font-display); font-weight: 700; margin: 0; line-height: 1.25; color: var(--text); }
+h1, .h1 { font-size: 30px; }
+h2, .h2 { font-size: 22px; }
+h3, .h3 { font-size: 17px; }
+p { margin: 0; }
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.small { font-size: 13px; }
+.accent-text { color: var(--accent-text); }
+[hidden] { display: none !important; }
+
+::selection { background: var(--accent); color: var(--on-accent); }
+
+/* One focus ring for the whole product: terracotta, offset, visible on
+   paper and on phosphor. Pointer users never see it; keyboard users always do. */
+:focus-visible { outline: 2.5px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+:focus:not(:focus-visible) { outline: none; }
+
+/* ---------- 4. Plume primitives ---------- */
+
+/* --- the signature: a Macintosh window ---
+   Rounded at the top, square at the bottom, 1px border, soft drop.
+   `.pl-titlebar` fills itself with horizontal drag stripes and the title
+   knocks a hole in them, exactly like System 1. */
+.pl-win {
+  background: var(--panel-bg);
+  border: var(--bw) solid var(--line-strong);
+  border-radius: var(--r-win) var(--r-win) var(--r-md) var(--r-md);
+  box-shadow: var(--shadow-win);
+  overflow: hidden;
+}
+.pl-titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-height: 38px;
+  padding: 0 8px 0 10px;
+  border-bottom: var(--bw) solid var(--line-strong);
+  background: var(--surface-2);
+  background-image: repeating-linear-gradient(to bottom, var(--line-strong) 0 1px, transparent 1px 3px);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 17px;
+  user-select: none;
+}
+/* Any child that carries text paints the bar's own colour behind itself,
+   or the stripes run straight through the words. */
+.pl-titlebar > * { position: relative; background: var(--surface-2); }
+.pl-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  padding: 2px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pl-titlebar .spacer { flex: 1; background: transparent; }
+/* The close square: a 1px outlined pixel box that fills on press, at a 44px tap target. */
+.pl-close {
+  flex: none;
+  width: 44px; height: 30px;
+  display: grid; place-items: center;
+  border: 0; background: var(--surface-2); padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pl-close::before {
+  content: "";
+  width: 13px; height: 13px;
+  border: 1.5px solid currentColor;
+  border-radius: 1px;
+  transition: background var(--dur-fast) linear;
+}
+.pl-close:hover { color: var(--text); }
+.pl-close:hover::before { background: currentColor; }
+.pl-close:active::before { background: var(--accent); border-color: var(--accent); }
+.win-body { padding: 18px; }
+.win-body > * + * { margin-top: 14px; }
+
+/* --- eyebrow: the Silkscreen micro-label with a rule that runs to the edge --- */
+.pl-eyebrow {
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+.pl-eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.pl-eyebrow.accent { color: var(--accent-text); }
+.pl-eyebrow.no-rule::after { display: none; }
+
+/* --- tag: the Silkscreen badge on a row --- */
+.pl-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border: var(--bw) solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.pl-tag.on   { border-color: var(--accent-line); background: var(--accent-dim); color: var(--accent-text); }
+.pl-tag.due  { border-color: var(--warn-line);   background: var(--warn-dim);   color: var(--warn); }
+.pl-tag.bad  { border-color: var(--error-line);  background: var(--error-dim);  color: var(--error); }
+.pl-tag.good { border-color: var(--green-line);  background: var(--green-dim);  color: var(--green); }
+/* A tag that carries a Chinese character (the memorization band 生認熟通)
+   keeps the CJK face for that glyph only. */
+.pl-tag .zh { font-family: var(--font-zh); font-size: 11px; letter-spacing: 0; text-transform: none; }
+
+/* --- pixel-art grid (rendered by js/pixel.js) --- */
+.px { display: inline-grid; line-height: 0; image-rendering: pixelated; flex: none; }
+.px i { display: block; }
+
+/* --- the boot wink: one scanline sweep on first paint --- */
+@media (prefers-reduced-motion: no-preference) {
+  .pl-boot::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent 0%, var(--accent-dim) 46%,
+      color-mix(in srgb, var(--accent) 22%, transparent) 50%, var(--accent-dim) 54%, transparent 100%);
+    animation: pl-scan 620ms var(--ease-out) 1 both;
+  }
+  @keyframes pl-scan {
+    from { transform: translateY(-100%); opacity: 1; }
+    to   { transform: translateY(100%); opacity: 0; }
+  }
+}
+
+/* Motion primitives shared by the views */
+@keyframes bob   { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes caret { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+@keyframes barber { to { background-position: 22px 0; } }
+@keyframes rise  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes pop   { 0% { transform: scale(.92); } 60% { transform: scale(1.04); } 100% { transform: scale(1); } }
+
+/* Global motion floor: a person who has asked the OS to stop animation
+   gets a still product, not a slower one. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

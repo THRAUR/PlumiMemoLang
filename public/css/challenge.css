@@ -1,0 +1,124 @@
+/* challenge.css — styles owned by public/js/views/challenge.js. Tokens from plume.css; kit from app.css.
+
+   The question types share one shape: an eyebrow saying what to do, a prompt,
+   then the answer surface (.options / tiles / one input). Only the primary
+   button carries terracotta; green and brick appear solely on a checked
+   answer, because here they mean right and wrong. */
+
+/* ---------- landing ---------- */
+.ch-landing > * + * { margin-top: 14px; }
+/* .field is a column flexbox, which would stretch a .seg to the full width
+   and leave its two options wildly different sizes. */
+.ch-landing .field .seg { align-self: flex-start; }
+.ch-landing .field .seg button { min-width: 68px; }
+.ch-win .pl-titlebar .px { color: var(--muted); padding: 0 8px; }
+.ch-empty-actions { justify-content: center; gap: 10px; }
+.ch-empty-actions .btn { margin-top: 0; }
+
+.ch-types {
+  border: var(--bw) solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.ch-type { padding: 2px 12px; border-bottom: var(--bw) solid var(--line); margin: 0; font-size: 15px; }
+.ch-type:last-child { border-bottom: 0; }
+.ch-type:hover { background: var(--surface-2); }
+.ch-reading-toggle { align-items: flex-start; padding: 10px 12px; border: var(--bw) dashed var(--line-strong); border-radius: var(--r-md); }
+.ch-reading-toggle input { margin-top: 3px; }
+.ch-reading-toggle .grow { display: flex; flex-direction: column; gap: 2px; }
+.ch-hint-line { font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+
+/* ---------- building (the AI reading job) ---------- */
+.ch-build { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 48px 16px; text-align: center; }
+
+/* ---------- a question ---------- */
+.ch-q { display: flex; flex-direction: column; gap: 16px; padding-top: 6px; }
+.ch-q > .pl-eyebrow { margin: 0; }
+.ch-prompt { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.ch-prompt .hz { text-align: center; word-break: break-word; }
+.ch-meaning { text-align: center; line-height: 1.35; }
+
+/* Listening: the play button IS the question. */
+.ch-listen { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 2px; }
+.ch-listen .btn--icon.btn--lg { width: 96px; height: 96px; min-height: 96px; border-radius: var(--r-md); }
+
+/* Typing: one big field, its border turning sage or brick once checked. */
+.ch-input { font-family: var(--font-mono); }
+.ch-input.is-ok { border-color: var(--green); background: var(--green-dim); }
+.ch-input.is-bad { border-color: var(--error); background: var(--error-dim); }
+.ch-input:disabled { opacity: 1; }          /* a checked answer must stay readable */
+
+/* Match pairs: hanzi down the left, meanings down the right. */
+.ch-match { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.ch-match-col { display: flex; flex-direction: column; gap: 10px; }
+.ch-tile { width: 100%; min-height: 56px; white-space: normal; text-align: center; line-height: 1.25; }
+.ch-tile--l { font-size: 24px; font-family: var(--font-zh); }
+.ch-tile--r { font-size: 15px; font-family: var(--font-body); padding: 8px 10px; }
+.ch-tile:disabled { cursor: default; box-shadow: none; transform: none; }
+
+/* Build the sentence: the answer line sits above its bank of characters. */
+.ch-order { display: flex; flex-direction: column; gap: 8px; }
+.ch-order .tile-answer.is-ok { border-bottom-color: var(--green); }
+.ch-order .tile-answer.is-bad { border-bottom-color: var(--error); }
+.ch-order .tile { font-family: var(--font-zh); }
+
+/* Fill the blank. */
+.ch-cloze { text-align: center; line-height: 1.5; word-break: break-word; }
+.ch-cloze-tr { text-align: center; }
+.ch-blank {
+  display: inline-block; min-width: 1.1em;
+  color: var(--faint); background: var(--sunk);
+  border-radius: var(--r-sm); padding: 0 .06em;
+}
+
+/* The AI reading passage, kept above its questions. */
+.ch-passage { padding: 14px; }
+.ch-passage .pl-eyebrow { margin: 0; }
+.ch-passage-zh { line-height: 1.75; }
+.ch-passage-tr { line-height: 1.45; }
+.ch-passage .btn--ghost { align-self: flex-start; margin-left: -8px; }
+
+/* What it should have been, inside the feedback banner. */
+.ch-detail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ch-detail .hz { line-height: 1.35; }
+.ch-detail-meaning { font-size: 15px; color: var(--text); }
+.ch-detail-readings { gap: 8px; flex-wrap: wrap; }
+
+/* ---------- session footer ---------- */
+.session-footer .ch-bird { flex: 0 0 auto; display: flex; align-items: center; }
+.ch-hint {
+  flex: 1 1 auto; text-align: right;
+  font-family: var(--font-label); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+}
+@media (min-width: 560px) { .session-footer .ch-bird { flex: 1 1 auto; } }
+/* Above Plumi with the tail pointing down: the kit's sideways bubble would
+   run off a 390px footer. */
+.ch-bird .bubble { left: 0; top: auto; bottom: calc(100% + 8px); min-width: 0; white-space: nowrap; }
+.ch-bird .bubble::before { top: auto; bottom: -4px; border: 0; border-right: var(--bw) solid var(--line-strong); border-bottom: var(--bw) solid var(--line-strong); }
+
+/* ui.js's feedback() cannot take a null detail (it prints "null"), so a
+   question with nothing to add passes an invisible marker instead. */
+.banner-detail:has(> .ch-quiet) { display: none; }
+
+/* ---------- the end screen ---------- */
+.ch-end .win-body { padding: 24px 16px 22px; }
+.ch-end-hero { position: relative; display: flex; justify-content: center; }
+/* `translate` rather than `transform`: the kit's `rise` animation ends on
+   `transform: none` and would undo the centring. */
+.ch-end-hero .bubble { left: 50%; right: auto; top: auto; bottom: calc(100% + 6px); translate: -50% 0; min-width: 0; white-space: nowrap; }
+.ch-end-hero .bubble::before { left: 50%; margin-left: -3px; top: auto; bottom: -4px; border: 0; border-right: var(--bw) solid var(--line-strong); border-bottom: var(--bw) solid var(--line-strong); }
+.ch-end-actions { flex: 1 1 auto; display: flex; gap: 10px; min-width: 0; }
+.ch-end-actions .btn { flex: 1 1 auto; min-width: 0; padding: 10px 10px; }
+.ch-score { font-family: var(--font-display); font-size: 40px; font-weight: 700; line-height: 1; text-align: center; }
+.ch-end .scoreboard { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 420px) {
+  /* Three columns stay three: XP, accuracy and time are short. */
+  .ch-end .score:nth-child(2) { border-right: var(--bw) solid var(--line-strong); }
+  .ch-end .score:nth-child(-n+2) { border-bottom: 0; }
+}
+.ch-recap .list-row { min-height: 40px; }
+.ch-recap .list-row:hover { background: transparent; }
+.ch-recap .is-ok .px { color: var(--green); }
+.ch-recap .is-bad .px { color: var(--error); }
+.ch-recap .is-bad { background: var(--error-dim); }

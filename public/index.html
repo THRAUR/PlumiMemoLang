@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#F8F6F1" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)" />
+<title>PlumiMemoLang</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="MemoLang" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/plume.css" />
+<link rel="stylesheet" href="/app.css" />
+<link rel="stylesheet" href="/css/today.css" />
+<link rel="stylesheet" href="/css/lessons.css" />
+<link rel="stylesheet" href="/css/review.css" />
+<link rel="stylesheet" href="/css/words.css" />
+<link rel="stylesheet" href="/css/challenge.css" />
+<link rel="stylesheet" href="/css/notes.css" />
+<link rel="stylesheet" href="/css/settings.css" />
+<script src="/js/pixel.js"></script>
+</head>
+<body class="pl-boot">
+  <div class="app">
+    <aside class="rail" id="rail" aria-label="Sections">
+      <a class="rail-brand" href="#/today"><span class="px" data-art="bird-idle" data-cell="2" aria-hidden="true"></span>PlumiMemoLang</a>
+      <a class="rail-link" href="#/today" data-nav="today"><span class="px" data-art="today" data-cell="2"></span>Today</a>
+      <a class="rail-link" href="#/lessons" data-nav="lessons"><span class="px" data-art="lessons" data-cell="2"></span>Lessons</a>
+      <a class="rail-link" href="#/review" data-nav="review"><span class="px" data-art="review" data-cell="2"></span>Review</a>
+      <a class="rail-link" href="#/words" data-nav="words"><span class="px" data-art="words" data-cell="2"></span>Words</a>
+      <a class="rail-link" href="#/challenge" data-nav="challenge"><span class="px" data-art="trophy" data-cell="2"></span>Challenge</a>
+      <a class="rail-link" href="#/notes" data-nav="notes"><span class="px" data-art="notes" data-cell="2"></span>Notes</a>
+      <a class="rail-link" href="#/settings" data-nav="settings"><span class="px" data-art="settings" data-cell="2"></span>Settings</a>
+      <div class="rail-foot">
+        <div class="row" id="railStats"></div>
+        <button class="btn btn--sm btn--quiet" type="button" id="themeBtn" aria-label="Switch theme"><span class="px" data-art="moon" data-cell="2"></span><span id="themeLabel">Dark</span></button>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <a class="topbar-brand" href="#/today"><span class="px" data-art="bird-idle" data-cell="2" aria-hidden="true"></span>MemoLang</a>
+        <div class="topbar-title" id="topbarTitle"></div>
+        <div class="topbar-stats" id="topbarStats"></div>
+      </header>
+      <main class="view" id="view" tabindex="-1"></main>
+    </div>
+    <nav class="tabbar" id="tabbar" aria-label="Sections">
+      <a class="tab" href="#/today" data-nav="today"><span class="px" data-art="today" data-cell="2"></span>Today</a>
+      <a class="tab" href="#/lessons" data-nav="lessons"><span class="px" data-art="lessons" data-cell="2"></span>Lessons</a>
+      <a class="tab" href="#/review" data-nav="review"><span class="px" data-art="review" data-cell="2"></span>Review</a>
+      <a class="tab" href="#/words" data-nav="words"><span class="px" data-art="words" data-cell="2"></span>Words</a>
+      <a class="tab" href="#/notes" data-nav="notes"><span class="px" data-art="notes" data-cell="2"></span>Notes</a>
+    </nav>
+  </div>
+  <div id="session" class="session" hidden></div>
+  <div id="windows"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

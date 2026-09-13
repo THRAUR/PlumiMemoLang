@@ -1,0 +1,50 @@
+/* words.css — styles owned by public/js/views/words.js. Tokens from plume.css; kit from app.css. */
+
+/* ---------- index header ---------- */
+.wd-head { justify-content: space-between; }
+.wd-head-title { gap: 10px; }
+
+/* ---------- filter row: one line, scrolls sideways on a phone ---------- */
+.wd-filters { display: flex; align-items: center; gap: 10px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+.wd-filters > * { flex: none; }
+.wd-filters select { width: auto; min-width: 130px; }
+
+/* ---------- result rows: two lines on a phone (hanzi+reading / meaning+meter) ---------- */
+.wd-row { align-items: stretch; }
+.wd-row-main { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; flex: 1; }
+.wd-row-l1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.wd-row-l1 .reading { font-size: 13px; }
+.wd-row-l2 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wd-row-meaning { flex: 1; min-width: 0; }
+.wd-row-l2 .meter { width: 70px; flex: none; }
+.wd-row-chip { display: none; flex: none; }
+@media (min-width: 640px) { .wd-row-chip { display: inline-flex; } }
+
+.wd-export { justify-content: flex-end; }
+
+.wd-empty-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+
+/* ---------- add/edit window ---------- */
+.wd-form textarea.wd-notesarea { min-height: 84px; }
+
+/* ---------- detail ---------- */
+.wd-back { margin-bottom: -4px; }
+.wd-detail-win .pl-title { display: flex; }
+
+.wd-hero { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; padding: 6px 0 2px; }
+.wd-hero-hz { justify-content: center; gap: 14px; }
+.wd-hero-reading { justify-content: center; }
+
+.wd-meaning { text-align: center; }
+
+.wd-tags { gap: 8px; justify-content: center; }
+
+.wd-memory-row { gap: 14px; }
+.wd-memory-row .meter { flex: 1; }
+.wd-score { font-family: var(--font-display); font-size: 20px; font-weight: 700; min-width: 2.4ch; text-align: right; }
+
+.wd-actions { gap: 10px; }
+.wd-enrich { gap: 10px; align-items: center; }
+.wd-enrich .bird { transform: scale(.75); transform-origin: left center; }
+
+.wd-answer { border-top: var(--bw) solid var(--line); padding-top: 12px; }

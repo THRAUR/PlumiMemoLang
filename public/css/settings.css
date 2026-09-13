@@ -1,0 +1,110 @@
+/* settings.css — styles owned by public/js/views/settings.js. Tokens from plume.css; kit from app.css.
+
+   Seven Mac windows stacked down the phone. Each window gets exactly one
+   terracotta element (Save key / New template / Download backup, or the
+   active segment of a .seg); everything else is ink, hairline and state. */
+
+.st-panel .win-body > * + * { margin-top: 16px; }
+/* The kit's segmented control is 36px tall, which is fine inside a dense
+   row but not as a settings control you hit with a thumb. */
+.st-panel .seg button { min-height: 44px; padding: 10px 14px; }
+.st-seg { max-width: 100%; }
+.st-num { max-width: 160px; }
+
+/* A field list rendered as tags: hanzi → reading, meaning */
+.st-fields { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.st-arrow { color: var(--faint); font-family: var(--font-mono); padding: 0 2px; }
+
+/* ---------- voice ---------- */
+.st-raterow { gap: 12px; }
+.st-range { flex: 1; min-width: 0; height: 44px; accent-color: var(--accent); }
+.st-rangeval { flex: none; width: 56px; text-align: right; font-size: 13px; color: var(--muted); }
+
+/* ---------- the API key ---------- */
+.st-keyrow { gap: 8px; min-height: 24px; }
+.st-keyform { gap: 10px; }
+.st-keyform .input { flex: 1; min-width: 180px; }
+.st-keyactions { gap: 10px; }
+
+/* ---------- models ---------- */
+.st-defaultrow { display: flex; flex-direction: column; gap: 6px; }
+.st-modelsrow { gap: 10px; }
+.st-modelsnote { flex: 1; min-width: 180px; }
+/* The button IS the value: it shows the model id it would change, so it has
+   to be allowed to be long and to truncate rather than blow up the row. */
+.st-modelbtn {
+  max-width: 100%; min-width: 0;
+  justify-content: flex-start;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0; text-transform: none;
+}
+.st-modelbtn .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.st-modelpick { gap: 4px; min-width: 0; }
+.st-modelpick .st-modelbtn { flex: 1; }
+/* 34px of ink, 44px of touch. */
+.st-modelpick .btn--icon, .st-tpl > .btn--icon { position: relative; }
+.st-modelpick .btn--icon::after, .st-tpl > .btn--icon::after { content: ""; position: absolute; inset: -5px; }
+
+.st-task { align-items: flex-start; flex-wrap: wrap; padding: 12px 14px; }
+.st-task-main { display: flex; flex-direction: column; gap: 4px; }
+.st-task-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-task-why { font-size: 13px; color: var(--faint); }
+.st-task-pick { flex: none; width: 100%; min-width: 0; }
+@media (min-width: 640px) {
+  .st-task-pick { width: auto; max-width: 46%; }
+}
+
+/* ---------- the model picker window ---------- */
+.st-pickerbox { min-height: 0; }
+.st-picker { max-height: 52vh; overflow: auto; -webkit-overflow-scrolling: touch; }
+/* .list is a column flex box: once it has a max-height its rows SHRINK
+   below their content and two lines of model meta land on the row below.
+   Any scrolling list in this view has to opt out of shrinking. */
+.st-picker .list-row, .st-usage .list-row { flex: none; }
+.st-model { align-items: flex-start; gap: 10px; padding: 10px 12px; }
+.st-model.is-current { background: var(--accent-dim); }
+.st-model-main { display: flex; flex-direction: column; gap: 2px; }
+.st-model-name { font-weight: 700; }
+.st-model-id { font-size: 11px; color: var(--faint); }
+.st-model-meta {
+  display: flex; flex-wrap: wrap; gap: 2px 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+}
+.st-model-tags { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
+/* ---------- usage ---------- */
+.st-usagebox { display: flex; flex-direction: column; gap: 12px; }
+.st-usagehead { gap: 8px; }
+.st-usagehead .pl-eyebrow { flex: 1; min-width: 0; }
+/* Money is longer than a word count: the kit's 24px display size overflows
+   a quarter of a 390px screen at $0.0123. */
+.st-usagebox .score .n { font-family: var(--font-mono); font-size: 15px; font-weight: 700; }
+.st-usage { max-height: 48vh; overflow: auto; }
+.st-usagerow { align-items: flex-start; gap: 10px; padding: 10px 12px; }
+.st-usagerow .grow { display: flex; flex-direction: column; gap: 3px; }
+.st-usage-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.st-usage-model { font-size: 11px; color: var(--muted); min-width: 0; }
+.st-usage-meta {
+  display: flex; flex-wrap: wrap; gap: 2px 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--faint);
+}
+.st-usage-cost { flex: none; font-size: 13px; color: var(--text); padding-top: 2px; }
+
+/* ---------- card templates ---------- */
+.st-tpl { align-items: flex-start; padding: 10px 10px 10px 4px; gap: 6px; }
+.st-tpl-check { flex: none; width: 44px; justify-content: center; margin: 0; }
+.st-tpl-main { display: flex; flex-direction: column; gap: 5px; padding-top: 10px; }
+.st-tpl-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-tpl-fields { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.st-tpl > .btn--icon { flex: none; margin-top: 6px; }
+
+.st-fieldpick { display: flex; flex-wrap: wrap; gap: 2px 16px; }
+.st-fieldcheck { min-width: 116px; font-size: 15px; }
+
+/* ---------- data ---------- */
+/* Kept in the layout but invisible: a display:none input cannot always be
+   opened with .click() on iOS Safari. */
+.st-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.st-databtns { gap: 10px; }
+.st-databtns .btn { flex: 1; min-width: 160px; }
+.st-where { word-break: break-word; }
+.st-where .mono { font-size: 12px; color: var(--muted); }

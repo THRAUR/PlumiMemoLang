@@ -1,0 +1,43 @@
+/* lessons.css — styles owned by public/js/views/lessons.js. Tokens from plume.css; kit from app.css. */
+
+/* ---------- index header ---------- */
+.ls-head { justify-content: space-between; gap: 12px; }
+
+.ls-hint { text-align: center; }
+.ls-hint p { margin-bottom: 4px; }
+
+/* ---------- detail header window ---------- */
+.ls-back { margin-bottom: -4px; }
+.ls-meta { gap: 12px; }
+.ls-progress { gap: 12px; }
+.ls-progress .meter { flex: 1; max-width: 220px; }
+.ls-actions { gap: 10px; }
+
+/* ---------- sections / grammar / dialogue ---------- */
+.ls-section-zh { font-size: 15px; color: var(--muted); margin-top: 2px; }
+.ls-pattern { font-size: 16px; }
+
+.ls-dialogue { display: flex; flex-direction: column; gap: 12px; }
+.ls-dialogue-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ls-dialogue-tr { flex: 1; min-width: 120px; }
+
+/* ---------- vocabulary rows: two lines on a phone, same rhythm as Words ---------- */
+.ls-word-row { align-items: stretch; }
+.ls-word-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.ls-word-l1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ls-word-l1 .reading { font-size: 13px; }
+.ls-word-l2 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ls-word-meaning { flex: 1; min-width: 0; }
+.ls-word-l2 .meter { width: 70px; flex: none; }
+.ls-word-chip { display: none; flex: none; }
+@media (min-width: 640px) { .ls-word-chip { display: inline-flex; } }
+
+.ls-foot-actions { gap: 10px; }
+
+/* ---------- add-word window ---------- */
+.ls-wordform textarea.ls-notesarea { min-height: 84px; }
+
+/* ---------- study session (flip-through) ---------- */
+.ls-study-body { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 28px 18px; }
+.ls-study-body .example { text-align: left; align-self: stretch; width: 100%; max-width: 420px; }
+.ls-study-done .win-body { text-align: center; }

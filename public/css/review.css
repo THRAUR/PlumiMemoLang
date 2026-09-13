@@ -1,0 +1,118 @@
+/* review.css — styles owned by public/js/views/review.js. Tokens from plume.css; kit from app.css.
+
+   Two regions, one accent each: the landing's "Start review" button and the
+   session footer's "Good" / "Show answer". Everything else here is geometry —
+   the card is a Mac window whose body centres a very large hanzi, and the
+   grade row is a 2x2 pad on a phone that unfolds into four columns on a desk. */
+
+/* ---------- landing ---------- */
+.rv-landing > * + * { margin-top: 14px; }
+.rv-counts { margin-bottom: 2px; }
+/* Due is a STATE, so it wears amber; the window's one terracotta is the
+   "Start review" button. */
+.rv-counts .is-due .n { color: var(--warn); }
+
+.rv-empty-actions { justify-content: center; gap: 10px; }
+.rv-empty-actions .btn { margin-top: 0; }
+
+/* The template chooser: hairline-separated .check rows, the sides of each
+   card spelled out in Silkscreen so the choice is concrete. */
+.rv-templates {
+  border: var(--bw) solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.rv-tpl { padding: 6px 12px; border-bottom: var(--bw) solid var(--line); margin: 0; }
+.rv-tpl:last-child { border-bottom: 0; }
+.rv-tpl:hover { background: var(--surface-2); }
+.rv-tpl .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rv-tpl-name { font-size: 15px; color: var(--text); line-height: 1.2; }
+.rv-tpl-sides {
+  font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- the card ---------- */
+/* A flashcard belongs in the middle of the screen. Auto margins centre it
+   without the clipping that justify-content:center causes once the card is
+   taller than the session body. */
+.rv-stage { min-height: 100%; display: flex; flex-direction: column; }
+.rv-stage > .pl-win { width: 100%; margin: auto 0; }
+.rv-card .pl-title { font-size: 13px; }
+.rv-count {
+  font-family: var(--font-label); font-size: 9px; letter-spacing: .06em;
+  color: var(--faint); padding: 2px 8px; white-space: nowrap;
+}
+.rv-body { text-align: center; padding: 26px 16px 28px; }
+@media (min-width: 640px) { .rv-body { padding: 40px 24px 44px; } }
+
+.rv-fields { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.rv-fields > .row { justify-content: center; }          /* readings, tags, meta */
+.rv-fields > * { max-width: 100%; }
+.rv-fields .hz { word-break: break-word; }
+
+/* The answer arrives as one block, under a hairline, so the eye knows the
+   card turned over. */
+.rv-back {
+  width: 100%;
+  padding-top: 16px;
+  border-top: var(--bw) dashed var(--line-strong);
+  animation: rise var(--dur-base) var(--ease-out) both;
+}
+.rv-meaning .meaning { line-height: 1.35; }
+.rv-meaning .small { margin-top: 4px; }
+.rv-example { width: 100%; text-align: left; }
+.rv-example .row { gap: 8px; }
+.rv-notes { width: 100%; text-align: left; font-size: 14px; color: var(--muted); padding: 12px 14px; }
+.rv-tags { gap: 6px; }
+.rv-meta { gap: 10px; flex-wrap: wrap; }
+.rv-meta .meter { width: 84px; }
+
+/* A blanked-out word in an example sentence. Neutral ink: the accent belongs
+   to the primary action, not to a gap in a sentence. */
+.rv-blank {
+  display: inline-block;
+  min-width: 1.1em;
+  color: var(--faint);
+  background: var(--sunk);
+  border-radius: var(--r-sm);
+  padding: 0 .06em;
+}
+.rv-cloze { width: 100%; }
+.rv-cloze .hz { line-height: 1.5; }
+.rv-cloze .small { margin-top: 8px; }
+
+/* The listening card's play button is the whole question, so it is huge. */
+.rv-audio { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.rv-audio .btn--icon.btn--lg { width: 96px; height: 96px; min-height: 96px; border-radius: var(--r-md); }
+.rv-audio .pl-eyebrow::after { display: none; }
+
+/* ---------- session footer ---------- */
+/* Plumi holds the left of the footer; on a phone it gives the grade pad the
+   whole width instead of competing with it. */
+.session-footer .rv-bird { flex: 0 0 auto; display: flex; align-items: center; }
+.rv-actions { flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+.rv-actions .btn { padding: 10px 8px; gap: 6px; min-width: 0; }
+.rv-actions .btn .kbd { flex: none; }
+@media (min-width: 560px) {
+  .session-footer .rv-bird { flex: 1 1 auto; }
+  .rv-actions { grid-template-columns: repeat(4, 1fr); max-width: 440px; }
+}
+
+/* Plumi's bubble points sideways by default, which walks off the edge of a
+   390px footer — above him, tail down, it stays on screen. */
+.rv-bird .bubble { left: 0; top: auto; bottom: calc(100% + 8px); min-width: 0; white-space: nowrap; }
+.rv-bird .bubble::before { top: auto; bottom: -4px; border: 0; border-right: var(--bw) solid var(--line-strong); border-bottom: var(--bw) solid var(--line-strong); }
+
+/* ---------- the end screen ---------- */
+.rv-end .win-body { text-align: center; padding: 26px 16px 28px; }
+.rv-end-hero { position: relative; display: flex; justify-content: center; padding-bottom: 4px; }
+/* Centred over the bird, so it cannot run off the card. */
+/* `translate` rather than `transform`: the kit's `rise` animation ends on
+   `transform: none` and would undo the centring. */
+.rv-end-hero .bubble { left: 50%; right: auto; top: auto; bottom: calc(100% + 6px); translate: -50% 0; min-width: 0; white-space: nowrap; }
+.rv-end-hero .bubble::before { left: 50%; margin-left: -3px; top: auto; bottom: -4px; border: 0; border-right: var(--bw) solid var(--line-strong); border-bottom: var(--bw) solid var(--line-strong); }
+.rv-end-title { margin-top: 10px; }
+.rv-end-actions { flex: 1 1 auto; display: flex; gap: 10px; min-width: 0; }
+.rv-end-actions .btn { flex: 1 1 auto; min-width: 0; padding: 10px 10px; }

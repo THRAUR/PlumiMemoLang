@@ -1,0 +1,205 @@
+/* notes.css — styles owned by public/js/views/notes.js. Tokens from plume.css; kit from app.css.
+
+   Mobile first: every row here is a column at 390px and only spreads out
+   when there is width to spend. The one terracotta in each region is the
+   primary button (Save notes / Turn into a lesson / Import), so nothing
+   else in this file may reach for --accent as decoration. */
+
+/* ---------- compose: photos ---------- */
+
+/* The real file input stays in the layout (a `hidden` input cannot always be
+   clicked programmatically on iOS) but takes no space and no taps. */
+.nt-file {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.nt-size { flex: 1; min-width: 140px; }
+
+.nt-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.nt-thumb {
+  position: relative;
+  flex: none;
+  width: 104px;
+  border: var(--bw) solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  overflow: hidden;
+}
+.nt-thumb img { width: 104px; height: 104px; object-fit: cover; }
+/* A 44px-wide tap target in the corner, drawn as a small pixel box like
+   .pl-close: full 44px of touch, 13px of ink. */
+.nt-thumb-x {
+  position: absolute; top: 0; right: 0;
+  width: 44px; height: 32px;
+  display: grid; place-items: center;
+  border: 0; border-bottom-left-radius: var(--r-md);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--muted);
+  padding: 0;
+}
+.nt-thumb-x:hover { background: var(--surface); color: var(--text); }
+.nt-thumb-meta {
+  display: block;
+  padding: 4px 6px;
+  border-top: var(--bw) solid var(--line);
+  background: var(--surface);
+  font-family: var(--font-mono); font-size: 10px; color: var(--faint);
+  text-align: center;
+}
+
+/* ---------- the processing state ---------- */
+.nt-processing { display: flex; flex-direction: column; gap: 14px; }
+.nt-processing > * + * { margin-top: 0; }        /* the flex gap owns the rhythm */
+.nt-processing .coach { align-items: center; }
+/* The kit's .progress is `flex: 1` for the session top bar; in this column
+   card that flex-basis:0 crushes it to a hairline. Pin the height back. */
+.nt-processing .progress { flex: none; height: 14px; }
+.nt-processing-foot { gap: 8px; }
+.nt-processing-foot .help { flex: 1; min-width: 160px; }
+.nt-model { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+.nt-jobhost:empty { display: none; }
+
+/* ---------- history rows ---------- */
+.nt-history { display: flex; flex-direction: column; gap: 10px; }
+.nt-loading { padding: 14px 16px; }
+
+.nt-row { align-items: flex-start; padding: 12px 14px; }
+.nt-row .grow { display: flex; flex-direction: column; gap: 4px; }
+.nt-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nt-row-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 700;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nt-row-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;
+  font-size: 12px; color: var(--faint);
+}
+.nt-row-shots { display: inline-flex; align-items: center; gap: 5px; }
+.nt-row-shots .px { color: var(--faint); }
+.nt-row-excerpt {
+  display: block;
+  font-size: 13px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- detail ---------- */
+.nt-back { align-self: flex-start; margin-left: -8px; }
+.view > .nt-back + * { margin-top: 12px; }
+
+.nt-head-top { align-items: flex-start; }
+.nt-title { word-break: break-word; }
+.nt-head-meta { gap: 8px 10px; }
+
+.nt-rawbox .nt-raw {
+  margin: 0;
+  max-height: 42vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 15px; line-height: 1.55;
+  color: var(--muted);
+}
+
+/* ---------- photo gallery ---------- */
+.nt-gallerybox { display: flex; flex-direction: column; gap: 10px; }
+.nt-gallery { display: flex; flex-wrap: wrap; gap: 10px; }
+.nt-shot {
+  flex: none;
+  width: 104px; height: 104px;
+  padding: 0;
+  display: grid; place-items: center;
+  border: var(--bw) solid var(--line-strong); border-radius: var(--r-md);
+  background: var(--sunk);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: transform var(--dur-fast) var(--ease-snap), box-shadow var(--dur-fast);
+}
+.nt-shot:active { transform: translate(2px, 2px); box-shadow: none; }
+.nt-shot img { width: 100%; height: 100%; object-fit: cover; }
+.nt-shot-gone { font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.nt-shot-full { width: 100%; height: auto; border-radius: var(--r-sm); }
+
+/* ---------- new / error: run the extract ---------- */
+.nt-run { --gap: 14px; }
+.nt-error { border-color: var(--error-line); background: color-mix(in srgb, var(--error) 5%, var(--surface)); }
+.nt-error p { color: var(--text); word-break: break-word; }
+.nt-nokey .muted { font-size: 15px; }
+.nt-warn { color: var(--warn); }
+
+/* ---------- draft: lesson preview ---------- */
+.nt-draft { --gap: 14px; }
+.nt-preview > * + * { margin-top: 14px; }
+.nt-section { padding-top: 2px; }
+.nt-section > * + * { margin-top: 8px; }
+.nt-section-zh { font-size: 17px; color: var(--muted); }
+.nt-more > * + * { margin-top: 16px; }
+
+.nt-grammar {
+  border-left: 3px solid var(--line-strong);
+  padding: 4px 0 4px 12px;
+}
+.nt-grammar > * + * { margin-top: 8px; }
+.nt-pattern { font-size: 19px; font-weight: 500; }
+.nt-grammar .example { border-left-width: 0; padding-left: 0; }
+
+.nt-dialogue { display: flex; flex-direction: column; gap: 12px; }
+.nt-line { display: flex; gap: 10px; align-items: flex-start; }
+.nt-line .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nt-speaker {
+  flex: none;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border: var(--bw) solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-family: var(--font-label); font-size: 9px; color: var(--muted);
+}
+.nt-line-zh { font-size: 19px; }
+.nt-line-tr { font-size: 14px; color: var(--muted); }
+
+/* ---------- draft: the word list ---------- */
+.nt-word { align-items: flex-start; padding: 10px 8px 10px 4px; gap: 6px; }
+.nt-check { flex: none; width: 44px; justify-content: center; margin: 0; }
+.nt-word-main { display: flex; flex-direction: column; gap: 3px; padding-top: 9px; }
+.nt-word-top { gap: 6px 10px; }
+.nt-word-top .reading { font-size: 14px; }
+.nt-word-meaning { gap: 4px 8px; font-size: 15px; color: var(--text); }
+.nt-word-native { font-style: italic; }
+/* A .btn--sm icon is 34px of ink; ::after lends it a 44px touch area
+   without making the row taller. */
+.nt-word > .btn--icon { flex: none; margin-top: 5px; position: relative; }
+.nt-word > .btn--icon::after { content: ""; position: absolute; inset: -5px; }
+
+/* The sticky import bar. It rides above the phone tab bar, below its z-index,
+   and stays reachable with a thumb while the learner scrolls the word list. */
+.nt-import {
+  position: sticky;
+  bottom: calc(var(--tab-h) + 10px + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 4px -4px 0;
+  padding: 10px 12px 12px;
+  border: var(--bw-strong) solid var(--line-strong); border-radius: var(--r-md);
+  background: var(--bar-bg);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-md);
+}
+.nt-import-top { gap: 6px; }
+.nt-import-count { font-family: var(--font-label); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+@media (min-width: 900px) {
+  .nt-import { bottom: 16px; }
+}
+
+/* ---------- imported ---------- */
+.nt-imported .px { color: var(--green); }
+
+/* ---------- footer ---------- */
+.nt-foot { display: flex; justify-content: flex-end; padding-top: 4px; border-top: var(--bw) solid var(--line); }
