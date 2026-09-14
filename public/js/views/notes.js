@@ -12,100 +12,45 @@
    browser BEFORE upload — a 4 MB phone shot becomes ~300 KB, which is
    what keeps `POST /api/notes` inside the 40 MB body limit and the
    vision bill small.
+
+   Documents (§8.6) joined the flow as a second tab: a textbook PDF
+   uploaded once, and after each class a page pick that becomes one to
+   four lessons (§8.5). Those screens are parts of this view:
+     #/notes?tab=documents            the library     (notes-docs.js)
+     #/notes?tab=documents&doc=<id>   a document and its page picker
+   The draft review lives in notes-draft.js; notes-kit.js holds what
+   the three share.
    ============================================================ */
 import { api } from '../api.js';
 import { settings, refreshStats } from '../state.js';
 import { navigate } from '../router.js';
 import { createBird } from '../bird.js';
+import { h, toast, confirmWindow, emptyState, busy, fmt, setTitle } from '../ui.js';
 import {
-  h, toast, openWindow, confirmWindow, progress, emptyState, busy, celebrate,
-  pixelIcon, fmt, markdownish, setTitle, readingEl,
-} from '../ui.js';
+  nextGen, endGen, isLive, enc, bytes, todayYmd, statusTag, icon, plural, setKids, win, closeWin, tabsEl,
+  resolvedExtractModel, hasImageInput, loadModels, cachedModels, processingCard, runJob, jobFailed, forgetJob,
+  sourcePagesText,
+} from './notes-kit.js';
+import { renderDocuments } from './notes-docs.js';
+import { draftBlock, importedBlock, sourceBlock } from './notes-draft.js';
 
 /* ---------- tuning ---------- */
 const MAX_SIDE = 1600;            // longest side of an uploaded photo, in px
 const JPEG_QUALITY = 0.85;        // whiteboard text survives this comfortably
 const RAW_PREVIEW_LINES = 6;      // how much of the raw notes shows collapsed
 
-const STATUS = {
-  new:        { label: 'new',        cls: '' },
-  processing: { label: 'processing', cls: 'due' },
-  draft:      { label: 'draft',      cls: 'on' },
-  imported:   { label: 'imported',   cls: 'good' },
-  error:      { label: 'error',      cls: 'bad' },
-};
-const POS = [['', '—'], ['n', 'noun'], ['v', 'verb'], ['adj', 'adjective'], ['adv', 'adverb'],
-  ['mw', 'measure word'], ['conj', 'conjunction'], ['prep', 'preposition'], ['part', 'particle'],
-  ['interj', 'interjection'], ['pron', 'pronoun'], ['num', 'number'], ['expr', 'expression']];
-const TYPES = [['character', 'character'], ['word', 'word'], ['phrase', 'phrase'],
-  ['sentence', 'sentence'], ['grammar', 'grammar']];
-
-/* ---------- module state ----------
-   `gen` is the render generation. Every async continuation checks it, so a
-   reply that lands after the learner navigated away paints nothing. */
-let gen = 0;
-let modelsCache = null;
 /* The compose box survives a trip into a note and back inside one session:
    losing a wall of pasted notes to a mistap would be unforgivable. */
 const compose = { title: '', classDate: '', text: '', images: [] };
 
 /* ---------- small helpers ---------- */
-function todayYmd() {
-  const d = new Date(), p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-function bytes(n) {
-  const v = Number(n) || 0;
-  if (v < 1024) return `${v} B`;
-  if (v < 1024 * 1024) return `${Math.round(v / 1024)} KB`;
-  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
-}
 function dataUrlBytes(dataUrl) {
   const b64 = String(dataUrl).split(',')[1] || '';
   const pad = (b64.match(/=+$/) || [''])[0].length;
   return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
 }
-function statusTag(status) {
-  const s = STATUS[status] || STATUS.new;
-  return h('span', { class: `pl-tag ${s.cls}`.trim() }, s.label);
-}
-function icon(name, cell = 2) { return pixelIcon(name, cell); }
-function plural(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
-/* h() drops null children; the raw DOM methods stringify them into the word
-   "null". Anywhere a child is conditional, it goes through these two. */
-function setKids(el, ...kids) {
-  el.replaceChildren();
-  return addKids(el, ...kids);
-}
-function addKids(el, ...kids) {
-  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) el.append(k);
-  return el;
-}
-/* openWindow() mounts into #windows, outside the view, so a hash change (the
-   Back button, a tap on the tab bar) would leave a modal floating over the
-   next screen. Every window this view opens goes through here. */
-let liveWin = null;
-function win(opts) {
-  liveWin?.close();
-  liveWin = openWindow({ ...opts, onClose: (r) => { liveWin = null; opts.onClose?.(r); } });
-  return liveWin;
-}
-function closeWin() { liveWin?.close(); liveWin = null; }
 function imgUrl(noteId, name) {
-  return `/api/notes/${encodeURIComponent(noteId)}/images/${encodeURIComponent(name)}`;
-}
-function resolvedExtractModel() {
-  const m = settings?.ai?.models || {};
-  return m.extract || m.default || '';
-}
-function hasImageInput(model) {
-  return !model || (model.inputModalities || []).includes('image');
-}
-async function loadModels() {
-  if (modelsCache) return modelsCache;
-  const raw = await api.get('/api/models');
-  modelsCache = Array.isArray(raw) ? raw : (raw?.models || []);
-  return modelsCache;
+  return `/api/notes/${enc(noteId)}/images/${enc(name)}`;
 }
 
 /* ---------- photo downscaling ----------
@@ -136,43 +81,6 @@ async function shrink(file) {
   const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
   const name = String(file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg';
   return { name, type: 'image/jpeg', dataUrl, size: dataUrlBytes(dataUrl), w, h: ht, from: file.size || 0 };
-}
-
-/* ---------- the processing state ----------
-   Used twice: straight after a save on #/notes, and when a note is opened
-   while its job is still running. */
-function processingCard({ model = '', text = '' } = {}) {
-  const bird = createBird({ size: 4, mood: 'think' });
-  const bubble = h('div', { class: 'bubble' }, text || 'Reading your notes…');
-  const bar = progress(1, 1, 'is-busy');
-  const pill = h('span', { class: 'pill nt-model', hidden: !model }, model || '');
-  const el = h('div', { class: 'card nt-processing' },
-    h('div', { class: 'coach' }, bird.el, bubble),
-    bar,
-    h('div', { class: 'row row--wrap nt-processing-foot' },
-      pill,
-      h('span', { class: 'help' }, 'This takes 10–60 seconds. You can leave this screen.')));
-  return {
-    el,
-    setProgress(t) { if (t) bubble.textContent = t; },
-    setModel(m) { pill.textContent = m || ''; pill.hidden = !m; },
-  };
-}
-
-/* Runs a process job and repaints when it settles. `host` is replaced by the
-   processing card while it runs. */
-async function runJob({ host, jobId, model, my, onDone }) {
-  const card = processingCard({ model });
-  host.replaceChildren(card.el);
-  try {
-    await api.job(jobId, { onProgress: (t) => { if (my === gen) card.setProgress(t); } });
-    if (my !== gen) return;
-    onDone();
-  } catch (e) {
-    if (my !== gen) return;
-    toast(e.message, 'bad');
-    onDone();
-  }
 }
 
 /* ============================================================
@@ -226,7 +134,7 @@ function composeWindow(my) {
       try { compose.images.push(await shrink(f)); } catch (e) { toast(e.message, 'bad'); }
     }
     busy(addBtn, false);
-    if (my === gen) paintStrip();
+    if (isLive(my)) paintStrip();
   });
 
   save.addEventListener('click', async () => {
@@ -250,7 +158,7 @@ function composeWindow(my) {
       toast(e.message, 'bad');
       return;
     }
-    if (my !== gen) return;
+    if (!isLive(my)) return;
     compose.title = ''; compose.text = ''; compose.images = [];
     title.value = ''; text.value = ''; paintStrip();
     busy(save, false);
@@ -264,12 +172,12 @@ function composeWindow(my) {
     try {
       ({ jobId } = await api.post(`/api/notes/${note.id}/process`, {}));
     } catch (e) {
-      if (my !== gen) return;
+      if (!isLive(my)) return;
       toast(e.message, 'bad');
       navigate('/notes/' + note.id);
       return;
     }
-    if (my !== gen) return;
+    if (!isLive(my)) return;
     await runJob({
       host: jobHost, jobId, my,
       model: resolvedExtractModel(),
@@ -298,26 +206,30 @@ function composeWindow(my) {
 
 function historyRow(note) {
   const excerpt = String(note.excerpt || note.text || '').replace(/\s+/g, ' ').trim();
-  return h('a', { class: 'list-row nt-row', href: `#/notes/${encodeURIComponent(note.id)}` },
+  const pages = sourcePagesText(note.source);
+  return h('a', { class: 'list-row nt-row', href: `#/notes/${enc(note.id)}` },
     h('span', { class: 'grow' },
       h('span', { class: 'nt-row-top' },
         h('b', { class: 'nt-row-title ellipsis' }, note.title || 'Untitled'),
         statusTag(note.status)),
       h('span', { class: 'nt-row-meta' },
+        /* A page pick from a document is marked as one, with its pages. */
+        note.source ? h('span', { class: 'nt-row-doc' }, icon('doc'), pages || 'document') : null,
         note.classDate ? h('span', null, fmt.date(note.classDate)) : null,
         note.imageCount || note.images?.length
           ? h('span', { class: 'nt-row-shots' }, icon('camera'), String(note.imageCount ?? note.images.length))
           : null,
+        note.draftLessons > 1 ? h('span', null, plural(note.draftLessons, 'lesson', 'lessons')) : null,
         h('span', null, fmt.rel(note.createdAt))),
       excerpt ? h('span', { class: 'nt-row-excerpt ellipsis' }, excerpt) : null));
 }
 
 async function renderIndex(root) {
-  const my = ++gen;
+  const my = nextGen();
   const listHost = h('div', { class: 'nt-history' },
     h('p', { class: 'pl-eyebrow' }, 'Your notes'),
     h('div', { class: 'card card--sunk card--flat nt-loading' }, h('p', { class: 'help' }, 'Loading your notes…')));
-  root.replaceChildren(composeWindow(my), listHost);
+  root.replaceChildren(tabsEl('notes'), composeWindow(my), listHost);
   setTitle('Notes');
 
   let notes = [];
@@ -325,7 +237,7 @@ async function renderIndex(root) {
     const res = await api.get('/api/notes');
     notes = Array.isArray(res) ? res : (res?.notes || []);
   } catch (e) {
-    if (my !== gen) return;
+    if (!isLive(my)) return;
     toast(e.message, 'bad');
     listHost.replaceChildren(
       h('p', { class: 'pl-eyebrow' }, 'Your notes'),
@@ -334,7 +246,7 @@ async function renderIndex(root) {
         h('p', { class: 'help' }, e.message)));
     return;
   }
-  if (my !== gen) return;
+  if (!isLive(my)) return;
   listHost.replaceChildren(
     h('p', { class: 'pl-eyebrow' }, 'Your notes'),
     notes.length
@@ -356,7 +268,7 @@ function noteHeader(note, my, reload) {
       h('h1', { class: 'h2 grow nt-title' }, note.title || 'Untitled'),
       h('button', {
         class: 'btn btn--sm btn--quiet', type: 'button', title: 'Rename',
-        onClick: () => renameWindow(note, (updated) => { if (my === gen) reload(updated); }),
+        onClick: () => renameWindow(note, (updated) => { if (isLive(my)) reload(updated); }),
       }, icon('notes'), 'Rename')),
     h('div', { class: 'row row--wrap nt-head-meta' },
       statusTag(note.status),
@@ -378,7 +290,7 @@ function renameWindow(note, onSaved) {
       { label: 'Cancel' },
       {
         label: 'Save', primary: true, onClick: async () => {
-          const updated = await api.put(`/api/notes/${encodeURIComponent(note.id)}`, {
+          const updated = await api.put(`/api/notes/${enc(note.id)}`, {
             title: title.value.trim(), classDate: date.value || null,
           });
           toast('Renamed');
@@ -406,8 +318,9 @@ function rawBlock(note) {
       more.textContent = open ? 'Show less' : `Show all ${lines.length} lines`;
     });
   }
+  /* A page pick keeps the learner's instructions where class notes keep the notes. */
   return h('section', { class: 'card card--sunk nt-rawbox' },
-    h('p', { class: 'pl-eyebrow' }, 'Raw notes'), pre, more);
+    h('p', { class: 'pl-eyebrow' }, note.source ? 'Your instructions' : 'Raw notes'), pre, more);
 }
 
 function galleryBlock(note) {
@@ -432,6 +345,8 @@ function galleryBlock(note) {
 /* --- new / error: choose a model and run extract --- */
 function processBlock(note, my, reload) {
   const box = h('section', { class: 'stack nt-run' });
+  /* Pages from a document reach the model as images, like photos do. */
+  const withImages = Boolean(note.images?.length || note.source);
   if (note.error) {
     box.append(h('div', { class: 'card nt-error' },
       h('div', { class: 'row' }, statusTag('error'), h('span', { class: 'pl-eyebrow no-rule' }, 'Last attempt')),
@@ -440,7 +355,9 @@ function processBlock(note, my, reload) {
   if (!settings?.ai?.hasApiKey) {
     box.append(h('div', { class: 'card nt-nokey' },
       h('p', { class: 'h3' }, 'No OpenRouter key yet'),
-      h('p', { class: 'muted' }, 'Plumi needs a key to read these notes and write the lesson. Your notes stay on this machine until you ask for one.'),
+      h('p', { class: 'muted' }, note.source
+        ? 'Plumi needs a key to read these pages and write the lessons. The document stays on this machine until you ask for one.'
+        : 'Plumi needs a key to read these notes and write the lesson. Your notes stay on this machine until you ask for one.'),
       h('a', { class: 'btn btn--primary', href: '#/settings' }, icon('settings'), 'Open Settings')));
     return box;
   }
@@ -450,21 +367,23 @@ function processBlock(note, my, reload) {
   const warn = h('p', { class: 'help nt-warn' });
   warn.hidden = true;
   const go = h('button', { class: 'btn btn--primary btn--block' },
-    icon('bolt'), note.status === 'error' ? 'Try again' : 'Turn into a lesson');
+    icon('bolt'), note.status === 'error' ? 'Try again' : note.source ? 'Make lessons' : 'Turn into a lesson');
 
   function checkWarning() {
-    const chosen = (modelsCache || []).find((m) => m.id === sel.value);
+    const chosen = (cachedModels() || []).find((m) => m.id === sel.value);
     const blind = chosen && !hasImageInput(chosen);
-    warn.hidden = !(blind && note.images?.length);
-    warn.textContent = 'This model cannot see images — only the typed notes would be sent. Pick one tagged for images.';
+    warn.hidden = !(blind && withImages);
+    warn.textContent = note.source
+      ? 'This model cannot read page images, so Plumi starts with the next model on your list that can.'
+      : 'This model cannot read photos, so Plumi starts with the next model on your list that can.';
   }
   sel.addEventListener('change', checkWarning);
 
   loadModels().then((models) => {
-    if (my !== gen) return;
-    const want = resolvedExtractModel();
+    if (!isLive(my)) return;
+    const want = resolvedExtractModel(withImages);
     const opts = models.map((m) => h('option', { value: m.id },
-      `${m.name || m.id}${hasImageInput(m) ? '' : ' (text only)'}`));
+      `${m.rank ? `${m.rank}. ` : ''}${m.name || m.id}${hasImageInput(m) ? '' : ' · text only'}`));
     if (want && !models.some((m) => m.id === want)) opts.unshift(h('option', { value: want }, want));
     if (!opts.length) opts.push(h('option', { value: '' }, 'Server default'));
     sel.replaceChildren(...opts);
@@ -472,7 +391,7 @@ function processBlock(note, my, reload) {
     sel.disabled = false;
     checkWarning();
   }).catch((e) => {
-    if (my !== gen) return;
+    if (!isLive(my)) return;
     toast(e.message, 'bad');
     const want = resolvedExtractModel();
     sel.replaceChildren(h('option', { value: want }, want || 'Server default'));
@@ -483,268 +402,66 @@ function processBlock(note, my, reload) {
     busy(go, true);
     let jobId = null;
     try {
-      ({ jobId } = await api.post(`/api/notes/${encodeURIComponent(note.id)}/process`, sel.value ? { model: sel.value } : {}));
+      ({ jobId } = await api.post(`/api/notes/${enc(note.id)}/process`, sel.value ? { model: sel.value } : {}));
     } catch (e) {
       busy(go, false);
       toast(e.message, 'bad');
       return;
     }
-    if (my !== gen) return;
-    await runJob({ host: box, jobId, my, model: sel.value || resolvedExtractModel(), onDone: () => reload() });
+    if (!isLive(my)) return;
+    await runJob({ host: box, jobId, my, model: sel.value || resolvedExtractModel(withImages), onDone: () => reload() });
   });
 
   box.append(h('div', { class: 'card nt-runcard' },
-    h('p', { class: 'pl-eyebrow' }, 'Turn these notes into a lesson'),
-    h('label', { class: 'field' }, h('span', { class: 'label' }, 'Model'), sel, warn),
+    h('p', { class: 'pl-eyebrow' }, note.source ? 'Make lessons from these pages' : 'Turn these notes into a lesson'),
+    h('label', { class: 'field' }, h('span', { class: 'label' }, 'Start with'), sel, warn,
+      h('span', { class: 'help' }, 'If it fails, Plumi moves down the model list in Settings.')),
     go));
   return box;
 }
 
-/* --- draft: the lesson preview --- */
-function exampleEl(ex) {
-  if (!ex) return null;
-  const reading = readingEl({ pinyin: ex.pinyin, zhuyin: ex.zhuyin }, { both: true });
-  return h('div', { class: 'example' },
-    ex.zh ? h('div', { class: 'zh', lang: 'zh-Hant' }, ex.zh) : null,
-    reading,
-    ex.translation ? h('div', { class: 'tr' }, ex.translation) : null);
-}
-function lessonPreview(lesson) {
-  const l = lesson || {};
-  const sections = Array.isArray(l.sections) ? l.sections : [];
-  const grammar = Array.isArray(l.grammar) ? l.grammar : [];
-  const dialogue = Array.isArray(l.dialogue) ? l.dialogue : [];
-  const body = h('div', { class: 'win-body nt-preview' });
-  addKids(body,
-    h('h2', { class: 'h2' }, l.title || 'Untitled lesson'),
-    l.summary ? h('p', { class: 'muted' }, l.summary) : null);
-
-  const sectionEl = (s) => h('div', { class: 'nt-section' },
-    h('p', { class: 'pl-eyebrow' }, s.kind || 'text'),
-    s.title ? h('h3', { class: 'h3' }, s.title) : null,
-    s.titleZh ? h('div', { class: 'nt-section-zh zh', lang: 'zh-Hant' }, s.titleZh) : null,
-    s.body ? markdownish(s.body) : null);
-
-  if (sections[0]) body.append(sectionEl(sections[0]));
-
-  const rest = h('div', { class: 'nt-more' });
-  for (const s of sections.slice(1)) rest.append(sectionEl(s));
-  if (grammar.length) {
-    rest.append(h('p', { class: 'pl-eyebrow' }, 'Grammar'));
-    for (const g of grammar) {
-      rest.append(h('div', { class: 'nt-grammar' },
-        h('div', { class: 'nt-pattern zh', lang: 'zh-Hant' }, g.pattern || ''),
-        g.explanation ? h('p', null, g.explanation) : null,
-        (Array.isArray(g.examples) ? g.examples : []).map(exampleEl)));
-    }
+function processingBlock(note, my, reload) {
+  const box = h('section', { class: 'stack nt-run' });
+  const model = note.model || resolvedExtractModel(Boolean(note.images?.length || note.source));
+  if (note.jobId && !jobFailed(note.jobId)) {
+    runJob({ host: box, jobId: note.jobId, my, model, onDone: () => reload() });
+    return box;
   }
-  if (dialogue.length) {
-    rest.append(h('p', { class: 'pl-eyebrow' }, 'Dialogue'));
-    const lines = h('div', { class: 'nt-dialogue' });
-    for (const d of dialogue) {
-      lines.append(h('div', { class: 'nt-line' },
-        h('span', { class: 'nt-speaker' }, d.speaker || '·'),
-        h('span', { class: 'grow' },
-          h('span', { class: 'zh nt-line-zh', lang: 'zh-Hant' }, d.zh || ''),
-          readingEl({ pinyin: d.pinyin, zhuyin: d.zhuyin }, { both: true }),
-          d.translation ? h('span', { class: 'nt-line-tr' }, d.translation) : null)));
-    }
-    rest.append(lines);
+  if (note.jobId) {
+    box.append(stalledCard(note, my, reload, box, model));
+    return box;
   }
-  const hasMore = rest.childElementCount > 0;
-  if (hasMore) {
-    rest.hidden = true;
-    const more = h('button', { class: 'btn btn--sm btn--ghost', type: 'button' }, 'Show more');
-    more.addEventListener('click', () => {
-      rest.hidden = !rest.hidden;
-      more.textContent = rest.hidden ? 'Show more' : 'Show less';
-    });
-    body.append(rest, more);
-  }
-
-  return h('section', { class: 'pl-win nt-lesson' },
-    h('div', { class: 'pl-titlebar' },
-      h('span', { class: 'pl-title zh', lang: 'zh-Hant' }, l.titleZh || l.title || 'Lesson'),
-      h('span', { class: 'spacer' }),
-      h('span', { class: 'pl-tag on' }, 'draft')),
-    body);
-}
-
-function wordEditor(word, onSave) {
-  const f = {};
-  const field = (key, label, extra = {}) => {
-    const input = h('input', { class: `input${extra.zh ? ' zh' : ''}`, type: 'text', value: word[key] || '', lang: extra.lang || undefined });
-    f[key] = () => input.value.trim();
-    return h('label', { class: 'field' }, h('span', { class: 'label' }, label), input);
-  };
-  const pick = (key, label, options) => {
-    const sel = h('select', { class: 'select' }, options.map(([v, t]) => h('option', { value: v }, t)));
-    sel.value = options.some(([v]) => v === (word[key] || '')) ? (word[key] || '') : options[0][0];
-    f[key] = () => sel.value;
-    return h('label', { class: 'field' }, h('span', { class: 'label' }, label), sel);
-  };
-  win({
-    title: 'Edit word',
-    wide: true,
-    body: h('div', { class: 'stack' },
-      field('hanzi', 'Hanzi (Traditional)', { zh: true, lang: 'zh-Hant' }),
-      h('div', { class: 'grid-2' },
-        field('pinyin', 'Pinyin (tone marks)'),
-        field('zhuyin', '注音 Zhuyin', { zh: true, lang: 'zh-Hant' })),
-      field('meaning', 'Meaning (English)'),
-      field('meaningNative', 'Meaning (your language)'),
-      h('div', { class: 'grid-2' }, pick('pos', 'Part of speech', POS), pick('type', 'Type', TYPES))),
-    actions: [
-      { label: 'Cancel' },
-      {
-        label: 'Save', primary: true, onClick: async () => {
-          const patch = {};
-          for (const [k, get] of Object.entries(f)) patch[k] = get();
-          if (!patch.hanzi) { toast('A word needs its characters.', 'bad'); return false; }
-          await onSave(patch);
-        },
-      },
-    ],
-  });
-}
-
-function draftBlock(note, my, reload) {
-  const draft = note.draft || {};
-  const words = Array.isArray(draft.words) ? draft.words : [];
-  const box = h('section', { class: 'stack nt-draft' });
-  box.append(h('p', { class: 'pl-eyebrow' }, 'Review the draft'), lessonPreview(draft.lesson));
-
-  const boxes = [];
-  const list = h('div', { class: 'list nt-words' });
-  const rowFor = (w, i) => {
-    const cb = h('input', { type: 'checkbox' });
-    cb.checked = !w.isKnown;
-    boxes[i] = cb;
-    const row = h('div', { class: 'list-row nt-word' });
-    const paint = () => {
-      const reading = readingEl(w, { both: true });
-      row.replaceChildren(
-        h('label', { class: 'check nt-check' }, cb, h('span', { class: 'sr-only' }, `Import ${w.hanzi || 'this word'}`)),
-        h('div', { class: 'grow nt-word-main' },
-          h('div', { class: 'row row--wrap nt-word-top' },
-            h('span', { class: 'hz hz--md', lang: 'zh-Hant' }, w.hanzi || '—'),
-            reading),
-          /* The tags ride with the meaning, not with the readings: a long
-             zhuyin string would otherwise push them onto a line of their own
-             and every row would wrap differently. */
-          h('div', { class: 'row row--wrap nt-word-meaning' },
-            h('span', { class: 'grow' }, w.meaning || h('span', { class: 'faint' }, 'no meaning yet')),
-            w.pos ? h('span', { class: 'pl-tag' }, w.pos) : null,
-            w.isKnown ? h('span', { class: 'pl-tag' }, 'known') : null),
-          w.meaningNative ? h('div', { class: 'nt-word-native muted small' }, w.meaningNative) : null),
-        h('button', {
-          class: 'btn btn--icon btn--sm', type: 'button', 'aria-label': `Edit ${w.hanzi || 'word'}`, title: 'Edit',
-          onClick: () => wordEditor(w, async (patch) => {
-            /* The whole draft goes back to the server, so the edit has to be
-               applied first — and rolled back if the write fails, or the copy
-               in memory would drift from the stored one. */
-            const before = { ...w };
-            Object.assign(w, patch);
-            let saved;
-            try {
-              saved = await api.put(`/api/notes/${encodeURIComponent(note.id)}/draft`, { draft });
-            } catch (e) {
-              Object.assign(w, before);
-              throw e;                      // openWindow toasts and keeps the window open
-            }
-            toast('Saved');
-            if (my !== gen) return;
-            if (saved?.draft?.words?.[i]) Object.assign(w, saved.draft.words[i]);
-            paint();
-          }),
-        }, icon('notes')));
-    };
-    paint();
-    cb.addEventListener('change', updateBar);
-    return row;
-  };
-  list.append(...words.map(rowFor));
-
-  /* --- the sticky import bar --- */
-  const count = h('span', { class: 'nt-import-count' });
-  const selectBtn = h('button', { class: 'btn btn--sm btn--quiet', type: 'button' }, 'Select all');
-  const reBtn = h('button', { class: 'btn btn--sm btn--quiet', type: 'button' }, icon('refresh'), 'Reprocess');
-  const importBtn = h('button', { class: 'btn btn--primary btn--block' }, icon('check'), 'Import');
-  function chosen() { return boxes.map((cb, i) => (cb.checked ? i : -1)).filter((i) => i >= 0); }
-  function updateBar() {
-    const n = chosen().length;
-    importBtn.replaceChildren(icon('check'), `Import ${plural(n, 'word', 'words')} + lesson`);
-    importBtn.disabled = false;
-    count.textContent = `${n} / ${words.length} selected`;
-    selectBtn.textContent = n === words.length && words.length ? 'Select none' : 'Select all';
-  }
-  selectBtn.addEventListener('click', () => {
-    const all = chosen().length === words.length && words.length > 0;
-    for (const cb of boxes) cb.checked = !all;
-    updateBar();
-  });
-  reBtn.addEventListener('click', async () => {
-    if (!(await confirmWindow({
-      title: 'Reprocess these notes?',
-      text: 'Plumi reads the notes again and replaces this draft. Your edits to the draft are lost.',
-      okLabel: 'Reprocess',
-    }))) return;
-    busy(reBtn, true);
-    let jobId = null;
-    try {
-      ({ jobId } = await api.post(`/api/notes/${encodeURIComponent(note.id)}/process`, {}));
-    } catch (e) {
-      busy(reBtn, false);
-      toast(e.message, 'bad');
-      return;
-    }
-    if (my !== gen) return;
-    await runJob({ host: box, jobId, my, model: note.model || resolvedExtractModel(), onDone: () => reload() });
-  });
-  importBtn.addEventListener('click', async () => {
-    busy(importBtn, true);
-    let res;
-    try {
-      res = await api.post(`/api/notes/${encodeURIComponent(note.id)}/import`, { words: chosen(), lesson: true });
-    } catch (e) {
-      busy(importBtn, false);
-      toast(e.message, 'bad');
-      return;
-    }
-    if (my !== gen) return;
-    celebrate(document.getElementById('view') || document.body);
-    toast('Lesson created · +10 XP', 'ok');
-    await refreshStats();
-    if (my !== gen) return;
-    if (res?.lessonId) navigate('/lessons/' + res.lessonId);
-    else reload();
-  });
-
-  updateBar();
-  box.append(
-    h('div', { class: 'section-head nt-words-head' },
-      h('p', { class: 'pl-eyebrow' }, `Words (${words.length})`)),
-    words.length ? list : h('div', { class: 'card card--sunk' }, h('p', { class: 'help' }, 'The model found no words in these notes. Try reprocessing with a stronger model.')),
-    h('div', { class: 'nt-import' },
-      h('div', { class: 'row row--wrap nt-import-top' }, selectBtn, reBtn, h('span', { class: 'grow' }), count),
-      importBtn));
+  const card = processingCard({ model, text: note.source ? 'Working on the pages…' : 'Working on your notes…' });
+  const again = h('button', { class: 'btn btn--sm btn--ghost', type: 'button', onClick: () => reload() }, icon('refresh'), 'Check again');
+  box.append(card.el, again);
   return box;
 }
 
-function importedBlock(note) {
-  const imp = note.imported || {};
-  const added = imp.wordIds?.length || 0;
-  const merged = imp.mergedHanzi?.length || 0;
-  return h('section', { class: 'card nt-imported' },
-    h('div', { class: 'row' }, icon('check', 3), h('p', { class: 'h3 grow' }, 'Imported')),
-    h('p', { class: 'muted' },
-      `${plural(added, 'word', 'words')} added, ${merged} ${merged === 1 ? 'was' : 'were'} already known.`),
-    imp.lessonId
-      ? h('p', null, h('a', { href: `#/lessons/${encodeURIComponent(imp.lessonId)}` }, note.draft?.lesson?.title || 'The lesson'))
-      : null,
-    h('div', { class: 'row row--wrap' },
-      imp.lessonId ? h('a', { class: 'btn btn--primary', href: `#/lessons/${encodeURIComponent(imp.lessonId)}` }, icon('lessons'), 'Open lesson') : null,
-      imp.lessonId ? h('a', { class: 'btn', href: `#/review?lesson=${encodeURIComponent(imp.lessonId)}` }, icon('review'), 'Practice') : null));
+/* The note says "processing" but its job is gone: the server restarted mid-run
+   (jobs live in its memory) or the connection dropped while polling. Polling on
+   its own would fail again and reload in a loop, so the learner decides. */
+function stalledCard(note, my, reload, box, model) {
+  const start = h('button', { class: 'btn btn--primary', type: 'button' }, icon('bolt'), 'Start again');
+  const check = h('button', { class: 'btn', type: 'button' }, icon('refresh'), 'Check again');
+  check.addEventListener('click', () => { forgetJob(note.jobId); reload(); });
+  start.addEventListener('click', async () => {
+    busy(start, true);
+    let jobId = null;
+    try {
+      ({ jobId } = await api.post(`/api/notes/${enc(note.id)}/process`, {}));
+    } catch (e) {
+      busy(start, false);
+      toast(e.message, 'bad');
+      return;
+    }
+    if (!isLive(my)) return;
+    await runJob({ host: box, jobId, my, model, onDone: () => reload() });
+  });
+  return h('div', { class: 'card nt-stalled' },
+    h('div', { class: 'coach' }, createBird({ size: 4, mood: 'sad' }).el,
+      h('div', { class: 'bubble' }, 'I lost track of this run.')),
+    h('p', { class: 'muted' }, 'The app may have restarted while Plumi was working. Check again, or start the run over.'),
+    h('div', { class: 'row row--wrap' }, start, check));
 }
 
 function footerBlock(note, my) {
@@ -752,19 +469,21 @@ function footerBlock(note, my) {
   del.addEventListener('click', async () => {
     if (!(await confirmWindow({
       title: 'Delete these notes?',
-      text: 'The notes and their photos go away. Words and lessons you already imported stay.',
+      text: note.source
+        ? 'This page pick and its draft go away. Words and lessons you already imported stay. A document you chose to use once goes with it.'
+        : 'The notes and their photos go away. Words and lessons you already imported stay.',
       okLabel: 'Delete',
       danger: true,
     }))) return;
     busy(del, true);
     try {
-      await api.del(`/api/notes/${encodeURIComponent(note.id)}`);
+      await api.del(`/api/notes/${enc(note.id)}`);
     } catch (e) {
       busy(del, false);
       toast(e.message, 'bad');
       return;
     }
-    if (my !== gen) return;
+    if (!isLive(my)) return;
     toast('Notes deleted');
     navigate('/notes');
   });
@@ -775,53 +494,46 @@ function paintNote(root, note, my, reload) {
   setKids(root,
     h('a', { class: 'btn btn--sm btn--quiet nt-back', href: '#/notes' }, icon('back'), 'All notes'),
     noteHeader(note, my, reload),
+    sourceBlock(note, my),
     rawBlock(note),
     galleryBlock(note),
     note.status === 'draft' ? draftBlock(note, my, reload) : null,
-    note.status === 'imported' ? importedBlock(note) : null,
+    note.status === 'imported' ? importedBlock(note, my) : null,
     note.status === 'processing' ? processingBlock(note, my, reload) : null,
     note.status === 'new' || note.status === 'error' ? processBlock(note, my, reload) : null,
     footerBlock(note, my));
   setTitle(note.title || 'Notes');
 }
 
-function processingBlock(note, my, reload) {
-  const box = h('section', { class: 'stack nt-run' });
-  if (note.jobId) {
-    runJob({ host: box, jobId: note.jobId, my, model: note.model || resolvedExtractModel(), onDone: () => reload() });
-    return box;
-  }
-  const card = processingCard({ model: note.model || resolvedExtractModel(), text: 'Working on your notes…' });
-  const again = h('button', { class: 'btn btn--sm btn--ghost', type: 'button', onClick: () => reload() }, icon('refresh'), 'Check again');
-  box.append(card.el, again);
-  return box;
-}
-
 async function renderDetail(root, id) {
-  const my = ++gen;
+  const my = nextGen();
   root.replaceChildren(
     h('a', { class: 'btn btn--sm btn--quiet nt-back', href: '#/notes' }, icon('back'), 'All notes'),
     h('div', { class: 'card card--sunk card--flat' }, h('p', { class: 'help' }, 'Loading…')));
   setTitle('Notes');
 
-  const reload = async (given) => {
-    if (my !== gen) return;
-    if (given) { paintNote(root, given, my, reload); return; }
-    try {
-      const fresh = await api.get(`/api/notes/${encodeURIComponent(id)}`);
-      if (my !== gen) return;
-      paintNote(root, fresh, my, reload);
-    } catch (e) {
-      if (my !== gen) return;
-      toast(e.message, 'bad');
+  const reload = async (given, { focusImported = false } = {}) => {
+    if (!isLive(my)) return;
+    let note = given;
+    if (!note) {
+      try {
+        note = await api.get(`/api/notes/${enc(id)}`);
+      } catch (e) {
+        if (isLive(my)) toast(e.message, 'bad');
+        return;
+      }
+      if (!isLive(my)) return;
     }
+    paintNote(root, note, my, reload);
+    /* After an import the page gets shorter and the lessons it made are the next step. */
+    if (focusImported) root.querySelector('.nt-imported')?.scrollIntoView({ block: 'center' });
   };
 
   let note;
   try {
-    note = await api.get(`/api/notes/${encodeURIComponent(id)}`);
+    note = await api.get(`/api/notes/${enc(id)}`);
   } catch (e) {
-    if (my !== gen) return;
+    if (!isLive(my)) return;
     toast(e.message, 'bad');
     root.replaceChildren(
       h('a', { class: 'btn btn--sm btn--quiet nt-back', href: '#/notes' }, icon('back'), 'All notes'),
@@ -832,7 +544,7 @@ async function renderDetail(root, id) {
     setTitle('Notes');
     return;
   }
-  if (my !== gen) return;
+  if (!isLive(my)) return;
   paintNote(root, note, my, reload);
 }
 
@@ -841,13 +553,15 @@ export default {
   id: 'notes',
   title: 'Notes',
   async render(root, params) {
+    const query = params?.query || {};
     if (params?.id) await renderDetail(root, params.id);
+    else if (query.tab === 'documents') await renderDocuments(root, { my: nextGen(), docId: query.doc || '' });
     else await renderIndex(root);
   },
   unmount() {
     /* Bumping the generation is most of the teardown: every pending job poll,
        fetch and image read checks it before touching the DOM. */
-    gen++;
+    endGen();
     closeWin();
   },
 };

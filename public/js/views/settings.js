@@ -12,30 +12,32 @@
    ============================================================ */
 import { api } from '../api.js';
 import { settings, setSettings, refreshStats, on } from '../state.js';
+import { navigate } from '../router.js';
 import {
   h, toast, openWindow, confirmWindow, busy, pixelIcon, fmt, setTitle, tts,
 } from '../ui.js';
+import { SKILLS, REASONS, CLASSES, TEMPLATE_FIELDS, DEFAULT_GOALS, normaliseGoals, normaliseTemplates, focusOf, learnerProfile, LANGUAGES } from '/shared/goals.js';
 
 /* ---------- option tables ---------- */
-const LANGUAGES = [
-  ['en', 'English'], ['fr', 'Français'], ['de', 'Deutsch'], ['es', 'Español'],
-  ['it', 'Italiano'], ['pt', 'Português'], ['ja', '日本語', 'ja'], ['ko', '한국어', 'ko'],
-  ['vi', 'Tiếng Việt'], ['th', 'ไทย', 'th'], ['id', 'Bahasa Indonesia'],
-];
+/* Exported for the welcome questions, which offer the same list. */
 const LEVELS = [['beginner', 'Beginner'], ['elementary', 'Elementary'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced']];
 const SCRIPTS = [['zhuyin', '注音 Zhuyin', 'zh-Hant'], ['pinyin', 'Pinyin'], ['both', 'Both']];
 const THEMES = [['light', 'Paper'], ['dark', 'Phosphor'], ['system', 'System']];
-/* Order and wording are fixed by docs/ARCHITECTURE.md §4.7. The "why" is the
-   only thing that makes a routing table usable: it says what the money buys. */
-const TASKS = [
-  { id: 'extract', label: 'Notes → lesson', importance: 'high', why: 'Turns your notes into the lesson you will learn from — use your best model' },
-  { id: 'suggest', label: 'Daily new words', importance: 'medium', why: "Picks tomorrow's words; a mid-tier model is plenty" },
-  { id: 'reading', label: 'Reading challenge', importance: 'medium', why: 'Writes a short passage; mid-tier' },
-  { id: 'enrich', label: 'Complete a word', importance: 'low', why: 'Fills in readings and examples; a cheap model is fine' },
-  { id: 'explain', label: 'Explain / ask', importance: 'low', why: 'Answers quick questions; a cheap model is fine' },
-];
-const CARD_FIELDS = ['hanzi', 'reading', 'meaning', 'example', 'audio', 'cloze', 'notes', 'tags'];
-const PICKER_LIMIT = 30;
+/* The field picker speaks the learner's language; the tags on a template row keep
+   the short field names the server validates (TEMPLATE_FIELDS in shared/goals.js). */
+const FIELD_LABELS = {
+  hanzi: 'Characters', reading: 'Reading', meaning: 'Meaning', example: 'Example', audio: 'Audio',
+  cloze: 'Fill the blank', notes: 'Notes', tags: 'Tags', record: 'Record yourself',
+};
+const HANZI_SEG = [['full', 'Big'], ['small', 'Small'], ['hidden', 'Hidden']];
+const HANZI_HELP = {
+  full: 'Characters lead, with the reading above them.',
+  small: 'The reading leads; the characters sit small underneath, to check the meaning.',
+  hidden: 'Only the reading. The characters stay out of the way.',
+};
+const FOCUS_TAG = { speaking: 'Speaking focus', characters: 'Characters focus', balanced: 'Balanced' };
+const FOCUS_WORDS = { speaking: 'speaking', characters: 'characters', balanced: 'a mix of speaking and characters' };
+const ABOUT_MAX = 500;       // the server's limit for goals.about
 
 /* A settings document to render against while GET /api/settings is unavailable,
    so the screen is never blank and never throws on a missing branch. */
@@ -44,7 +46,9 @@ const FALLBACK = {
   dailyGoalXp: 30, newWordsPerDay: 5, theme: 'system',
   tts: { voice: '', rate: 0.9 },
   cardTemplates: [],
-  ai: { models: { default: '', extract: '', suggest: '', enrich: '', explain: '', reading: '' }, monthlyBudgetUsd: 5, hasApiKey: false, apiKeyMasked: '' },
+  goals: { ...DEFAULT_GOALS },
+  display: { hanzi: '' },
+  ai: { priority: [], monthlyBudgetUsd: 5, hasApiKey: false, apiKeyMasked: '' },
 };
 
 /* ---------- module state ---------- */
@@ -103,9 +107,13 @@ function debouncedSaver(ms = 500) {
     pending.set(t, flush);
   };
 }
+/* Returns once every flushed save has landed, for "Ask me again", which must
+   not open the questions before the last keystroke in the note is stored. */
 function flushPending() {
-  for (const [t, flush] of pending) { clearTimeout(t); flush(); }
+  const saves = [];
+  for (const [t, flush] of pending) { clearTimeout(t); saves.push(flush()); }
   pending.clear();
+  return Promise.all(saves);
 }
 
 /* ---------- kit shorthands ---------- */
@@ -166,10 +174,6 @@ function per1M(price) {
   if (!v) return 'free';
   return v < 1000 ? `$${v.toFixed(2)}` : `$${Math.round(v)}`;
 }
-function contextLabel(n) {
-  const v = Number(n || 0);
-  return v ? `${Math.round(v / 1000)}k ctx` : 'ctx ?';
-}
 function hasImage(m) { return (m?.inputModalities || []).includes('image'); }
 async function getModels({ refresh = false } = {}) {
   if (!refresh && modelsCache) return modelsCache;
@@ -178,52 +182,152 @@ async function getModels({ refresh = false } = {}) {
   return modelsCache;
 }
 
-/* ---------- the model picker ---------- */
-function openModelPicker({ title = 'Choose a model', current = '', onPick }) {
-  const search = h('input', { class: 'input', type: 'search', placeholder: 'Search by name or id', autocomplete: 'off' });
-  const list = h('div', { class: 'list st-picker' });
-  const note = h('p', { class: 'help' });
+/* ---------- 0. Your goals ----------
+   The welcome answers, editable in place (docs/ARCHITECTURE.md §8.7). Chips and
+   segments save the moment they change; the note for Plumi is debounced like
+   every text field here and is never repainted, so a save cannot eat a
+   half-typed sentence. */
+function goalsPanel() {
+  const ids = (list) => list.map((x) => x.id);
+  let focusMoved = false;      // a skills change on this visit moved the focus
 
-  const row = (m) => h('button', {
-    class: `list-row st-model${m.id === current ? ' is-current' : ''}`, type: 'button',
-    onClick: () => { closeWin(); onPick(m.id); },
-  },
-  h('span', { class: 'grow st-model-main' },
-    h('span', { class: 'st-model-name ellipsis' }, m.name || m.id),
-    h('span', { class: 'st-model-id mono ellipsis' }, m.id),
-    h('span', { class: 'st-model-meta' },
-      h('span', null, contextLabel(m.contextLength)),
-      h('span', null, `${per1M(m.pricing?.prompt)} / ${per1M(m.pricing?.completion)} per 1M`))),
-  h('span', { class: 'st-model-tags' },
-    hasImage(m) ? h('span', { class: 'pl-tag' }, 'image') : null,
-    m.supportsStructured ? h('span', { class: 'pl-tag' }, 'json') : null,
-    m.id === current ? h('span', { class: 'pl-tag on' }, 'in use') : null));
+  function chipSet(options, getOn, onToggle, label) {
+    const box = h('div', { class: 'st-chips', role: 'group', 'aria-label': label });
+    const buttons = options.map((o) => {
+      const b = h('button', { class: 'st-chip', type: 'button', 'aria-pressed': 'false' }, icon('plus', 1), h('span', null, o.label));
+      b.addEventListener('click', () => onToggle(o.id));
+      box.append(b);
+      return { id: o.id, b };
+    });
+    /* Painted in place, so the chip a keyboard user just pressed keeps focus. */
+    box.paint = () => {
+      const on = getOn();
+      for (const { id, b } of buttons) {
+        const isOn = on.includes(id);
+        if (b.getAttribute('aria-pressed') === String(isOn)) continue;
+        b.classList.toggle('is-on', isOn);
+        b.setAttribute('aria-pressed', String(isOn));
+        b.firstChild.replaceWith(icon(isOn ? 'check' : 'plus', 1));
+      }
+    };
+    box.paint();
+    return box;
+  }
+  /* Quick taps must not undo each other: each tap builds on the list the last
+     tap left, not on settings that are still on their way back from the server. */
+  function listEditor(key, allowed, { label, min = 0, minText = '', onSaved = null }) {
+    let draft = null;
+    let inFlight = 0;
+    const now = () => draft || normaliseGoals(cur().goals)[key];
+    async function toggle(id) {
+      const before = now();
+      const on = !before.includes(id);
+      const next = ids(allowed).filter((x) => (x === id ? on : before.includes(x)));
+      if (next.length < min) { toast(minText, 'bad'); return; }
+      draft = next;
+      inFlight += 1;
+      chips.paint();
+      const saved = await save({ goals: { [key]: next } });
+      inFlight -= 1;
+      if (!inFlight) draft = null;
+      if (saved) onSaved?.(before, next);
+      paint();                 // a failed save repaints the stored answer back
+    }
+    const chips = chipSet(allowed, now, toggle, label);
+    return chips;
+  }
+
+  const focusTag = h('span', { class: 'pl-tag' });
+  const skillChips = listEditor('skills', SKILLS, {
+    label: 'What you want to do', min: 1, minText: 'Keep at least one thing you want to do.',
+    onSaved: (before, next) => { if (focusOf({ skills: before }) !== focusOf({ skills: next })) focusMoved = true; },
+  });
+  const reasonChips = listEditor('reasons', REASONS, { label: 'Why you are learning' });
+
+  /* The focus moved but the cards still drill the old one: offer to follow. */
+  const hintText = h('span', { class: 'st-goalhint-text' });
+  const switchBtn = h('button', { class: 'btn btn--sm btn--primary', type: 'button' }, 'Switch my cards to match');
+  const hint = h('div', { class: 'st-goalhint', role: 'status', hidden: true }, hintText, switchBtn);
+  function paintHint() {
+    const p = learnerProfile(cur());
+    const enabled = normaliseTemplates(cur().cardTemplates).filter((t) => t.builtin && t.enabled).map((t) => t.id);
+    const matches = p.templates.length === enabled.length && p.templates.every((id) => enabled.includes(id));
+    hintText.textContent = `Your focus is now ${FOCUS_WORDS[p.focus]}.`;
+    hint.hidden = !focusMoved || matches;
+  }
+  switchBtn.addEventListener('click', async () => {
+    const rec = learnerProfile(cur()).templates;
+    // Builtins follow the focus; a template the learner made keeps its own switch.
+    const next = normaliseTemplates(cur().cardTemplates).map((t) => (t.builtin ? { ...t, enabled: rec.includes(t.id) } : t));
+    busy(switchBtn, true);
+    const saved = await save({ cardTemplates: next });
+    busy(switchBtn, false);
+    if (saved) { focusMoved = false; paintHint(); }
+  });
+
+  /* Characters: the stored mode, or the one the focus picks while nothing is stored. */
+  const hanziHelp = h('span', { class: 'help' });
+  const hanziSeg = segEl(HANZI_SEG, learnerProfile(cur()).hanzi, (v) => {
+    paintHanziHelp(v, true);
+    save({ display: { hanzi: v } }).then((saved) => { if (!saved) paintHanzi(); });
+  });
+  function paintHanziHelp(mode, chosen = Boolean(cur().display?.hanzi)) {
+    hanziHelp.textContent = `${HANZI_HELP[mode] || ''}${chosen ? '' : ' Picked from your goals.'}`;
+  }
+  function paintHanzi() {
+    const mode = learnerProfile(cur()).hanzi;
+    [...hanziSeg.children].forEach((b, i) => b.classList.toggle('is-active', HANZI_SEG[i][0] === mode));
+    paintHanziHelp(mode);
+  }
+
+  const aboutSave = debouncedSaver();
+  const about = h('textarea', {
+    class: 'textarea st-about', rows: 3, maxlength: ABOUT_MAX,
+    placeholder: 'My teacher is Carl, we meet twice a week', value: normaliseGoals(cur().goals).about,
+  });
+  const aboutCount = h('span', { class: 'st-count mono' });
+  const paintCount = () => { aboutCount.textContent = `${about.value.length} / ${ABOUT_MAX}`; };
+  about.addEventListener('input', () => { paintCount(); aboutSave({ goals: { about: about.value.trim() } }); });
+  paintCount();
+
+  const again = h('button', { class: 'btn', type: 'button' }, icon('refresh'), 'Ask me again');
+  again.addEventListener('click', async () => {
+    busy(again, true);
+    await flushPending();
+    navigate('/welcome');
+  });
 
   function paint() {
-    const all = modelsCache || [];
-    const q = search.value.trim().toLowerCase();
-    const hits = q
-      ? all.filter((m) => String(m.id || '').toLowerCase().includes(q) || String(m.name || '').toLowerCase().includes(q))
-      : all;
-    const top = hits.slice(0, PICKER_LIMIT);
-    list.replaceChildren(...top.map(row));
-    if (!all.length) {
-      list.replaceChildren(h('div', { class: 'list-row' }, h('span', { class: 'help' }, 'No model list loaded. Close this and press “Refresh list”.')));
-      note.textContent = '';
-      return;
-    }
-    if (!top.length) list.replaceChildren(h('div', { class: 'list-row' }, h('span', { class: 'help' }, `Nothing matches “${search.value.trim()}”.`)));
-    note.textContent = `${hits.length} of ${all.length} models${hits.length > top.length ? ` · showing the first ${PICKER_LIMIT}` : ''}`;
+    focusTag.textContent = FOCUS_TAG[learnerProfile(cur()).focus];
+    skillChips.paint();
+    reasonChips.paint();
+    paintHanzi();
+    paintHint();
   }
-  search.addEventListener('input', paint);
+  repaints.add(paint);
   paint();
 
-  return win({
-    title, wide: true,
-    body: h('div', { class: 'stack st-pickerbox' },
-      h('div', { class: 'search' }, icon('search'), search),
-      list, note),
-  });
+  return panel('Your goals',
+    h('div', { class: 'field' },
+      h('div', { class: 'st-goalhead' }, h('span', { class: 'label' }, 'What you want to do'), focusTag),
+      skillChips, hint),
+    h('div', { class: 'grid-2' },
+      h('div', { class: 'field' },
+        h('span', { class: 'label' }, 'Readings'),
+        segEl(SCRIPTS, cur().script || 'zhuyin', (v) => save({ script: v }))),
+      h('div', { class: 'field' },
+        h('span', { class: 'label' }, 'Characters'),
+        hanziSeg)),
+    hanziHelp,
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Why you are learning'), reasonChips),
+    h('label', { class: 'field' },
+      h('span', { class: 'label' }, 'Anything Plumi should know'),
+      about,
+      h('span', { class: 'st-countrow' }, h('span', { class: 'help' }, 'Plumi reads this when it writes your lessons.'), aboutCount)),
+    field('Classes', selectEl(CLASSES.map((c) => [c.id, c.label]), normaliseGoals(cur().goals).classes, (v) => save({ goals: { classes: v } }))),
+    h('div', { class: 'row row--wrap st-again' },
+      again,
+      h('span', { class: 'help' }, 'Plumi asks the welcome questions again, starting from these answers.')));
 }
 
 /* ---------- 1. Learner ---------- */
@@ -233,15 +337,12 @@ function learnerPanel() {
   const name = h('input', { class: 'input', type: 'text', value: s.learnerName || '', placeholder: 'Your name', maxlength: 60 });
   name.addEventListener('input', () => nameSave({ learnerName: name.value.trim() }));
 
+  // Readings moved to "Your goals", next to how big the characters are.
   return panel('Learner',
     field('Your name', name, 'Plumi greets you with it.'),
     h('div', { class: 'grid-2' },
       field('Explain things in', selectEl(LANGUAGES, s.nativeLanguage || 'en', (v) => save({ nativeLanguage: v }))),
       field('Your level', selectEl(LEVELS, s.level || 'beginner', (v) => save({ level: v })))),
-    h('div', { class: 'field' },
-      h('span', { class: 'label' }, 'Readings'),
-      segEl(SCRIPTS, s.script || 'zhuyin', (v) => save({ script: v })),
-      h('span', { class: 'help' }, 'What sits above the characters everywhere in the app.')),
     h('div', { class: 'grid-2' },
       field('Daily goal (XP)', numberEl({ value: s.dailyGoalXp ?? 30, min: 5, max: 500, step: 5 }, (n) => ({ dailyGoalXp: n }))),
       field('New words per day', numberEl({ value: s.newWordsPerDay ?? 5, min: 0, max: 50, step: 1 }, (n) => ({ newWordsPerDay: n })))));
@@ -345,7 +446,8 @@ function aiPanel(my) {
     busy(testBtn, true);
     try {
       const res = await api.post('/api/ai/test', {});
-      toast(res?.reply ? `${res.reply}` : 'The connection works.', 'ok', 5000);
+      const after = res?.fallbacks?.length ? ` after ${res.fallbacks.map((f) => nameOf(f.model)).join(', ')} failed` : '';
+      toast(`${nameOf(res?.model)} answered${after}${res?.reply ? `: ${res.reply}` : '.'}`, 'ok', 6000);
     } catch (e) {
       toast(e.message, 'bad', 5000);
     } finally {
@@ -353,67 +455,117 @@ function aiPanel(my) {
     }
   });
 
-  /* --- models: the default and the per-task overrides --- */
-  const defaultRow = h('div', { class: 'st-defaultrow' });
-  const routing = h('div', { class: 'list st-tasks' });
-  const modelsNote = h('p', { class: 'help st-modelsnote' }, 'Loading the model list…');
-  const refresh = h('button', { class: 'btn btn--sm btn--ghost', type: 'button' }, icon('refresh'), 'Refresh list');
+  /* --- models: the allowed list, in the order Plumi tries them ---
+     The key only allows these models, so there is nothing to pick from, only
+     an order to set. Each row says why it sits where it does and what it costs,
+     and can be tested on its own: "is my backup alive?" has to be answerable
+     before the day the first model is down. */
+  const prioList = h('div', { class: 'list st-prio' });
+  const prioNote = h('p', { class: 'help st-prio-note' }, 'Loading the model list…');
+  const resetOrder = h('button', { class: 'btn btn--sm btn--quiet', type: 'button' }, icon('refresh'), 'Recommended order');
+  resetOrder.hidden = true;
+  const results = new Map();     // model id → the last per-model test, kept across repaints
 
-  function modelButton(label, { title, current, onPick, clear = null }) {
-    const b = h('button', { class: 'btn btn--sm st-modelbtn', type: 'button' }, h('span', { class: 'ellipsis' }, label));
-    b.addEventListener('click', () => openModelPicker({ title, current, onPick }));
-    if (!clear) return b;
-    const x = h('button', { class: 'btn btn--icon btn--sm btn--quiet', type: 'button', 'aria-label': 'Use the default model', title: 'Use the default' }, icon('x'));
-    x.addEventListener('click', clear);
-    return h('span', { class: 'row st-modelpick' }, b, x);
+  /* OpenRouter may answer with a dated id ("…-flash-lite-20260721"); the name
+     is looked up by prefix so the toast still says "Gemini 3.5 Flash Lite". */
+  function nameOf(id) {
+    const s = String(id || '');
+    const m = (modelsCache || []).find((x) => s === x.id || s.startsWith(`${x.id}-`) || s.startsWith(`${x.id}:`));
+    return m?.name || s || 'A model';
   }
-
-  function paintModels() {
-    const models = cur().ai?.models || {};
-    const def = models.default || '';
-    defaultRow.replaceChildren(
-      h('span', { class: 'label' }, 'Default model'),
-      modelButton(def || 'Choose a model', {
-        title: 'Default model', current: def,
-        onPick: (id) => save({ ai: { models: { default: id } } }),
-      }));
-    routing.replaceChildren(...TASKS.map((t) => {
-      const override = models[t.id] || '';
-      return h('div', { class: 'list-row st-task' },
-        h('div', { class: 'grow st-task-main' },
-          h('div', { class: 'st-task-top' },
-            h('b', null, t.label),
-            h('span', { class: `pl-tag ${t.importance === 'high' ? 'on' : ''}`.trim() }, t.importance)),
-          h('div', { class: 'st-task-why' }, t.why)),
-        h('div', { class: 'st-task-pick' },
-          modelButton(override || `Default (${def || 'not set'})`, {
-            title: `Model for ${t.label}`, current: override || def,
-            onPick: (id) => save({ ai: { models: { [t.id]: id } } }),
-            clear: override ? () => save({ ai: { models: { [t.id]: '' } } }) : null,
-          })));
-    }));
+  function currentOrder() {
+    const order = cur().ai?.priority;
+    return Array.isArray(order) && order.length ? order : (modelsCache || []).map((m) => m.id);
   }
-  repaints.add(paintModels);
-
-  async function loadModels(opts) {
-    modelsNote.textContent = opts?.refresh ? 'Refreshing…' : 'Loading the model list…';
+  function recommendedOrder() {
+    return [...(modelsCache || [])]
+      .filter((m) => m.recommendedRank)
+      .sort((a, b) => a.recommendedRank - b.recommendedRank)
+      .map((m) => m.id);
+  }
+  function move(id, delta) {
+    const order = [...currentOrder()];
+    const i = order.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    save({ ai: { priority: order } });
+  }
+  async function testOne(id, button) {
+    busy(button, true);
     try {
-      const list = await getModels(opts);
+      const res = await api.post('/api/ai/test', { model: id });
       if (my !== gen) return;
-      modelsNote.textContent = list.length
-        ? `${list.length} models available on OpenRouter · ${list.filter(hasImage).length} of them can read images.`
-        : 'OpenRouter returned no models.';
+      results.set(id, { ok: true, label: 'works' });
+      toast(`${nameOf(id)} works${res?.reply ? `: ${res.reply}` : '.'}`, 'ok', 5000);
     } catch (e) {
       if (my !== gen) return;
-      modelsNote.textContent = e.message;
-      toast(e.message, 'bad');
+      results.set(id, { ok: false, label: 'failed' });
+      toast(`${nameOf(id)}: ${e.message}`, 'bad', 6000);
+    } finally {
+      busy(button, false);
+      if (my === gen) paintOrder();
     }
   }
-  refresh.addEventListener('click', async () => {
-    busy(refresh, true);
-    await loadModels({ refresh: true });
-    busy(refresh, false);
+
+  function paintOrder() {
+    const order = currentOrder();
+    /* Rows wait for the model list: without it every row would claim "text
+       only" for a moment, which is exactly the fact the learner acts on. */
+    if (!order.length || !modelsCache) {
+      prioList.replaceChildren(h('div', { class: 'list-row' }, h('span', { class: 'help' }, 'Loading the model list…')));
+      return;
+    }
+    const byId = new Map(modelsCache.map((m) => [m.id, m]));
+    const keyed = Boolean(cur().ai?.hasApiKey);
+    prioList.replaceChildren(...order.map((id, i) => {
+      const m = byId.get(id) || { id, name: id };
+      const last = results.get(id);
+      const up = h('button', { class: 'btn btn--icon btn--sm btn--quiet', type: 'button', 'aria-label': `Move ${m.name} up`, title: 'Move up', disabled: i === 0 }, icon('up'));
+      const down = h('button', { class: 'btn btn--icon btn--sm btn--quiet', type: 'button', 'aria-label': `Move ${m.name} down`, title: 'Move down', disabled: i === order.length - 1 }, icon('down'));
+      up.addEventListener('click', () => move(id, -1));
+      down.addEventListener('click', () => move(id, 1));
+      const test = h('button', {
+        class: 'btn btn--sm', type: 'button', disabled: !keyed,
+        title: keyed ? `Send ${m.name} one short message` : 'Save a key first',
+      }, icon('bolt'), 'Test');
+      test.addEventListener('click', () => testOne(id, test));
+      const price = m.pricing
+        ? `${per1M(m.pricing.prompt)} in · ${per1M(m.pricing.completion)} out, per 1M tokens`
+        : (m.inCatalog === false ? 'Not in the OpenRouter catalog right now' : '');
+      return h('div', { class: 'list-row st-prio-row' },
+        h('span', { class: `st-rank${i === 0 ? ' is-first' : ''}`, title: i === 0 ? 'Tried first' : 'Tried when the models above it fail' }, String(i + 1)),
+        h('div', { class: 'grow st-prio-main' },
+          h('div', { class: 'st-prio-top' },
+            h('b', { class: 'st-prio-name' }, m.name || id),
+            h('span', { class: 'pl-tag' }, hasImage(m) ? 'reads photos' : 'text only'),
+            last ? h('span', { class: `pl-tag ${last.ok ? 'good' : 'bad'}` }, last.label) : null),
+          m.why ? h('div', { class: 'st-prio-why' }, m.why) : null,
+          price ? h('div', { class: 'st-prio-meta mono' }, price) : null,
+          h('div', { class: 'row st-prio-actions' }, test)),
+        h('div', { class: 'st-prio-move' }, up, down));
+    }));
+    const recommended = recommendedOrder();
+    resetOrder.hidden = !recommended.length || recommended.join('\n') === order.join('\n');
+  }
+  repaints.add(paintOrder);
+  resetOrder.addEventListener('click', () => {
+    const recommended = recommendedOrder();
+    if (recommended.length) save({ ai: { priority: recommended } });
   });
+
+  async function loadModels() {
+    try {
+      await getModels();
+      if (my !== gen) return;
+      prioNote.textContent = 'Photo notes skip the models that cannot read photos.';
+    } catch (e) {
+      if (my !== gen) return;
+      prioNote.textContent = e.message;
+      toast(e.message, 'bad');
+    }
+    paintOrder();
+  }
 
   /* --- budget --- */
   const budget = numberEl(
@@ -461,7 +613,7 @@ function aiPanel(my) {
   }
 
   paintKey();
-  paintModels();
+  paintOrder();
   loadModels();
   loadUsage();
 
@@ -477,12 +629,10 @@ function aiPanel(my) {
       actionRow),
     h('hr', { class: 'divider' }),
     h('div', { class: 'field' },
-      defaultRow,
-      h('div', { class: 'row row--wrap st-modelsrow' }, modelsNote, refresh)),
-    h('div', { class: 'field' },
-      h('span', { class: 'label' }, 'Which model does what'),
-      routing,
-      h('span', { class: 'help' }, 'Photo notes need a model with image input.')),
+      h('span', { class: 'label' }, 'Model order'),
+      h('span', { class: 'help' }, 'Plumi starts at the top. When a model fails, it moves down to the next one. Your key only allows these models.'),
+      prioList,
+      h('div', { class: 'row row--wrap st-prio-foot' }, prioNote, resetOrder)),
     h('hr', { class: 'divider' }),
     field('Monthly budget (USD)', budget, 'A soft ceiling: Plumi warns you, it does not stop you.'),
     usageBox);
@@ -492,32 +642,48 @@ function aiPanel(my) {
 function templatesPanel() {
   const list = h('div', { class: 'list st-templates' });
 
-  function rowFor(t, i) {
+  /* Always the normalised list, matched by id: a PUT reply carries the stored list
+     as it is (old names, and no "Say it" in a file from an older build), so a
+     position in that list is not a position in this one. */
+  const allTemplates = () => normaliseTemplates(cur().cardTemplates);
+  /* Review needs at least one kind of card to ask. */
+  const lastOn = (t) => t.enabled !== false && !allTemplates().some((x) => x.id !== t.id && x.enabled !== false);
+
+  function rowFor(t) {
     const cb = h('input', { type: 'checkbox' });
     cb.checked = t.enabled !== false;
     cb.addEventListener('change', () => {
-      const next = (cur().cardTemplates || []).map((x, j) => (j === i ? { ...x, enabled: cb.checked } : x));
-      save({ cardTemplates: next });
+      if (!cb.checked && lastOn(t)) {
+        cb.checked = true;
+        toast('Keep at least one card type on, or Review has nothing to ask.', 'bad');
+        return;
+      }
+      const next = allTemplates().map((x) => (x.id === t.id ? { ...x, enabled: cb.checked } : x));
+      save({ cardTemplates: next }).then((saved) => { if (!saved) paint(); });
     });
     const del = t.builtin ? null : h('button', {
       class: 'btn btn--icon btn--sm btn--quiet', type: 'button', 'aria-label': `Delete ${t.name}`, title: 'Delete',
     }, icon('x'));
     del?.addEventListener('click', async () => {
+      if (lastOn(t)) { toast('Turn on another card type before deleting this one.', 'bad'); return; }
       if (!(await confirmWindow({ title: `Delete “${t.name}”?`, text: 'Cards already reviewed keep their history; this template just stops appearing.', okLabel: 'Delete', danger: true }))) return;
-      save({ cardTemplates: (cur().cardTemplates || []).filter((_, j) => j !== i) });
+      save({ cardTemplates: allTemplates().filter((x) => x.id !== t.id) });
     });
+    // Which builtins the learner's goals would pick, so "Switch my cards to match" is never a mystery.
+    const fits = t.builtin && learnerProfile(cur()).templates.includes(t.id);
     return h('div', { class: 'list-row st-tpl' },
       h('label', { class: 'check st-tpl-check' }, cb, h('span', { class: 'sr-only' }, `Use ${t.name}`)),
       h('div', { class: 'grow st-tpl-main' },
         h('div', { class: 'st-tpl-top' },
           h('b', null, t.name || t.id),
+          fits ? h('span', { class: 'pl-tag' }, 'fits your goals') : null,
           t.builtin ? null : h('span', { class: 'pl-tag' }, 'custom')),
         h('div', { class: 'st-tpl-fields' },
           tagList(t.front), h('span', { class: 'st-arrow' }, '→'), tagList(t.back))),
       del);
   }
   function paint() {
-    const tpls = cur().cardTemplates || [];
+    const tpls = allTemplates();
     list.replaceChildren(...(tpls.length
       ? tpls.map(rowFor)
       : [h('div', { class: 'list-row' }, h('span', { class: 'help' }, 'No card templates yet. Add one below.'))]));
@@ -538,12 +704,12 @@ function newTemplateWindow() {
   const mk = (which) => {
     const box = h('div', { class: 'st-fieldpick' });
     const inputs = {};
-    for (const f of CARD_FIELDS) {
+    for (const f of TEMPLATE_FIELDS) {
       const cb = h('input', { type: 'checkbox' });
       inputs[f] = cb;
-      box.append(h('label', { class: 'check st-fieldcheck' }, cb, f));
+      box.append(h('label', { class: 'check st-fieldcheck' }, cb, FIELD_LABELS[f] || f));
     }
-    return { box, read: () => CARD_FIELDS.filter((f) => inputs[f].checked), which };
+    return { box, read: () => TEMPLATE_FIELDS.filter((f) => inputs[f].checked), which };
   };
   const front = mk('front');
   const back = mk('back');
@@ -562,7 +728,7 @@ function newTemplateWindow() {
           const f = front.read(), b = back.read();
           if (!label) { toast('Give the template a name.', 'bad'); return false; }
           if (!f.length || !b.length) { toast('Pick at least one field for each side.', 'bad'); return false; }
-          const existing = cur().cardTemplates || [];
+          const existing = normaliseTemplates(cur().cardTemplates);
           const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'template';
           let id = base, n = 2;
           while (existing.some((t) => t.id === id)) id = `${base}-${n++}`;
@@ -658,6 +824,7 @@ export default {
 
     /* voicePanel() is null on a browser without speechSynthesis. */
     setKids(root,
+      goalsPanel(),
       learnerPanel(),
       lookPanel(),
       voicePanel(),
@@ -666,7 +833,7 @@ export default {
       dataPanel(my),
       aboutPanel(my));
 
-    /* Panels that only display settings (the key, the routing table, the
+    /* Panels that only display settings (the key, the model order, the
        template list) repaint themselves whenever the document changes —
        nothing here re-renders a field the learner might be typing in. */
     offSettings = on('settings', () => {

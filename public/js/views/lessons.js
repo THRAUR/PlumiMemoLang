@@ -11,11 +11,13 @@ import { api } from '../api.js';
 import { settings } from '../state.js';
 import { navigate } from '../router.js';
 import { createBird } from '../bird.js';
-import { hanziEl, readingLine } from '../hanzi.js';
+import { hanziEl, wordHero, wordLine, exampleEl as hzExampleEl } from '../hanzi.js';
+import { recordControl } from '../speech.js';
 import { hanziChars, pinyinToZhuyin } from '/shared/zhuyin.js';
 import {
   h, toast, openWindow, confirmWindow, emptyState, meter, bandChip,
   pixelIcon, fmt, readingEl, speakButton, markdownish, setTitle, openSession,
+  tts, celebrate, hanziMode,
 } from '../ui.js';
 
 /* ---------- lookups ---------- */
@@ -34,12 +36,18 @@ function hasHanzi(s) { return hanziChars(s).length > 0; }
 /* A generation counter: async chains check it before touching the DOM, so a
    fast navigation away never paints into a screen the router already replaced. */
 let gen = 0;
-let liveSession = null;   // the open study session, so unmount() can close it
+let liveSession = null;   // the open study or dialogue session, so unmount() can close it
+const timers = new Set();
+function later(fn, ms) { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t; }
+function clearTimers() { for (const t of timers) clearTimeout(t); timers.clear(); }
 
 /* ---------- a compact add-word window, scoped to one lesson.
    (Same fields as the Words screen's window; views don't share internals,
    so this is a small, deliberate duplicate rather than a cross-view import.) ---------- */
 function openWordWindow({ lessonId, onSaved }) {
+  // Same field order rule as the Words screen's window (§8): a speaking learner's
+  // notes lead with pinyin and English, so the form does too, with characters last.
+  const speaking = hanziMode() !== 'full';
   const hanziInput = h('input', { class: 'input zh', placeholder: '謝謝' });
   const pinyinInput = h('input', { class: 'input', placeholder: 'xiè xie' });
   const zhuyinInput = h('input', { class: 'input zh', placeholder: 'ㄒㄧㄝˋ ˙ㄒㄧㄝ' });
@@ -59,19 +67,24 @@ function openWordWindow({ lessonId, onSaved }) {
   const exTr = h('input', { class: 'input', placeholder: 'Thanks for your help.' });
   const field = (label, input, help) => h('label', { class: 'field' }, h('span', { class: 'label' }, label), input, help ? h('span', { class: 'help' }, help) : null);
 
+  const hanziField = field('Hanzi', hanziInput, speaking ? 'Characters are kept as a reference' : null);
+  const readingRow = h('div', { class: 'grid-2' }, field('Pinyin', pinyinInput), field('Zhuyin', zhuyinInput));
+  const exampleZhField = field('Example (Chinese)', exZh);
+  const exampleReadingRow = h('div', { class: 'grid-2' }, field('Example pinyin', exPinyin), field('Example translation', exTr));
+  const middleFields = [
+    field('Meaning', meaningInput),
+    field(`Meaning in ${nativeLabel()}`, meaningNativeInput),
+    h('div', { class: 'grid-2' }, field('Part of speech', posSelect), field('Type', typeSelect)),
+    field('Tags', tagsInput, 'Comma separated'),
+    field('Notes', notesInput),
+  ];
+  const bodyFields = speaking
+    ? [readingRow, ...middleFields, h('p', { class: 'pl-eyebrow' }, 'Example'), exampleReadingRow, exampleZhField, hanziField]
+    : [hanziField, readingRow, ...middleFields, h('p', { class: 'pl-eyebrow' }, 'Example'), exampleZhField, exampleReadingRow];
+
   openWindow({
     title: 'Add word',
-    body: h('div', { class: 'stack ls-wordform' },
-      field('Hanzi', hanziInput),
-      h('div', { class: 'grid-2' }, field('Pinyin', pinyinInput), field('Zhuyin', zhuyinInput)),
-      field('Meaning', meaningInput),
-      field(`Meaning in ${nativeLabel()}`, meaningNativeInput),
-      h('div', { class: 'grid-2' }, field('Part of speech', posSelect), field('Type', typeSelect)),
-      field('Tags', tagsInput, 'Comma separated'),
-      field('Notes', notesInput),
-      h('p', { class: 'pl-eyebrow' }, 'Example'),
-      field('Example (Chinese)', exZh),
-      h('div', { class: 'grid-2' }, field('Example pinyin', exPinyin), field('Example translation', exTr))),
+    body: h('div', { class: 'stack ls-wordform' }, ...bodyFields),
     actions: [
       { label: 'Cancel' },
       {
@@ -101,11 +114,25 @@ function openWordWindow({ lessonId, onSaved }) {
   });
 }
 
+/* hanzi.js's exampleEl() draws the sentence by the learner's display rules
+   (§8.3, reading first and large in speaking focus) but has no speak option,
+   so the button rides alongside in its own row. */
 function exampleEl(ex) {
-  return h('div', { class: 'example' },
-    h('div', { class: 'row' }, h('div', { class: 'zh grow', lang: 'zh-Hant' }, ex.zh || ''), speakButton(ex.zh || '', { size: 'sm' })),
-    readingEl(ex),
-    ex.translation ? h('div', { class: 'tr' }, ex.translation) : null);
+  const body = hzExampleEl(ex);
+  if (!body) return null;
+  return h('div', { class: 'row ls-example-row' }, h('div', { class: 'grow' }, body), speakButton(ex.zh || '', { size: 'sm', label: 'Play the sentence' }));
+}
+
+/* A dialogue line by the same display rules as an example (§8.3): reading first
+   and large in speaking focus, characters small, under the speaker tag. */
+function dialogueLineEl(d) {
+  const content = hzExampleEl(d) || h('div', { class: 'example' });
+  return h('div', { class: `ls-dialogue-line${d.speaker === 'B' ? ' is-b' : ''}` },
+    h('div', { class: 'row ls-dialogue-head' },
+      h('span', { class: 'pl-tag' }, d.speaker || '·'),
+      h('span', { class: 'grow' }),
+      speakButton(d.zh || '', { size: 'sm', label: 'Play the line' })),
+    content);
 }
 
 /* ---------- index (#/lessons) ---------- */
@@ -215,7 +242,9 @@ async function renderIndex(root) {
 
 /* ---------- detail (#/lessons/:id) ---------- */
 function lessonWordRow(w) {
-  const line1 = h('div', { class: 'ls-word-l1' }, hanziEl(w, { size: 'md', reading: 'none' }), readingLine(w));
+  // wordLine() leads with the reading and shrinks the characters for a speaking
+  // learner (§8.3); a character learner gets characters with the reading beside them.
+  const line1 = h('div', { class: 'ls-word-l1' }, wordLine(w));
   const line2 = h('div', { class: 'ls-word-l2' }, h('span', { class: 'muted ellipsis ls-word-meaning' }, w.meaning || ''), meter(w.score || 0));
   const chip = bandChip(w.band);
   if (chip) { chip.classList.add('ls-word-chip'); line2.append(chip); }
@@ -234,7 +263,9 @@ function startStudySession(lesson) {
   function showCard() {
     session.setProgress(idx, words.length);
     const w = words[idx];
-    const body = h('div', { class: 'win-body ls-study-body' }, hanziEl(w, { size: 'xl', reading: 'none' }));
+    // wordHero draws the front by the learner's mode (§8.3): full ruby hanzi for a
+    // character learner, a big reading with small characters for a speaking one.
+    const body = h('div', { class: 'win-body ls-study-body' }, wordHero(w, { size: 'xl' }));
     session.body.replaceChildren(h('div', { class: 'pl-win ls-study-card' },
       h('div', { class: 'pl-titlebar' }, h('span', { class: 'pl-title' }, `${idx + 1} / ${words.length}`), h('span', { class: 'spacer' })),
       body));
@@ -266,6 +297,131 @@ function startStudySession(lesson) {
     session.footer.replaceChildren();
   }
   showCard();
+}
+
+/* "Practice this dialogue" (§8.4): line by line, Plumi models the line, the
+   learner takes a turn to say it and record themselves, then moves on.
+   "Take a role" turns the other speaker's lines into listening practice and
+   hides the learner's own line behind its translation, so they have to
+   produce it before they peek. */
+function startDialogueSession(lesson) {
+  const lines = (lesson.dialogue || []).filter((d) => d && d.zh);
+  if (!lines.length) { toast('This lesson has no dialogue yet.', ''); return; }
+  const speakers = [...new Set(lines.map((d) => d.speaker).filter(Boolean))];
+  const canPickRole = speakers.length >= 2;
+
+  let idx = 0;
+  let role = 'both';    // 'both' | one of `speakers`
+  let slow = false;
+  let rec = null;       // the current line's recordControl, if the learner started one
+
+  const session = openSession({
+    title: 'Practice the dialogue',
+    onClose: () => { rec?.destroy(); rec = null; liveSession = null; },
+  });
+  liveSession = session;
+
+  const rate = () => (slow ? 0.6 : undefined);
+
+  function cardShell(line, bodyEl) {
+    return h('div', { class: 'pl-win ls-dg-card' },
+      h('div', { class: 'pl-titlebar' },
+        h('span', { class: 'pl-title' }, line.speaker ? `Speaker ${line.speaker}` : 'Dialogue'),
+        h('span', { class: 'spacer' }),
+        h('span', { class: 'ls-dg-count' }, `${idx + 1} / ${lines.length}`)),
+      bodyEl);
+  }
+
+  function roleRow() {
+    if (!canPickRole) return null;
+    const items = [{ v: 'both', l: 'Both' }, ...speakers.map((s) => ({ v: s, l: `Role ${s}` }))];
+    const btns = items.map((it) => h('button', { type: 'button', class: it.v === role ? 'is-active' : '' }, it.l));
+    btns.forEach((b, n) => b.addEventListener('click', () => { role = items[n].v; paint(); }));
+    return h('div', { class: 'row ls-dg-rolerow' }, h('span', { class: 'pl-eyebrow no-rule ls-dg-rolelabel' }, 'Take a role'), h('div', { class: 'seg' }, ...btns));
+  }
+
+  function paint() {
+    rec?.destroy(); rec = null;
+    if (idx >= lines.length) { paintEnd(); return; }
+    const line = lines[idx];
+    session.setProgress(idx, lines.length);
+    // In a role, the OTHER speaker's lines are just listening practice; the
+    // learner's own lines are hidden behind their translation until revealed.
+    const mine = role !== 'both' && line.speaker === role;
+    const card = mine ? promptCard(line) : fullCard(line, { canRecord: role === 'both' });
+    stage(card);
+  }
+
+  // Centres a short card in the body with auto margins (min-height: 100%), the
+  // same trick review.js uses, so one line does not look stranded near the top
+  // of a tall phone screen; a long card still scrolls instead of clipping.
+  function stage(card) {
+    session.body.replaceChildren(h('div', { class: 'ls-dg-stage' }, ...[roleRow(), card].filter(Boolean)));
+    session.body.scrollTop = 0;
+  }
+
+  // The learner's own line in role mode: translation only, until they peek.
+  function promptCard(line) {
+    const showBtn = h('button', { class: 'btn btn--primary btn--lg', type: 'button' }, 'Show me');
+    showBtn.addEventListener('click', () => stage(fullCard(line, { canRecord: true })));
+    session.footer.replaceChildren(showBtn);
+    return cardShell(line, h('div', { class: 'win-body ls-dg-body ls-dg-prompt' },
+      h('p', { class: 'pl-eyebrow' }, 'Your line — say it before you peek'),
+      h('p', { class: 'ls-dg-translation' }, line.translation || '')));
+  }
+
+  // The full line: reading big, translation, characters small (exampleEl, §8.3).
+  // Plumi models it; the learner's own lines also get a turn to say it back.
+  function fullCard(line, { canRecord }) {
+    const card = cardShell(line, h('div', { class: 'win-body ls-dg-body' }, hzExampleEl(line) || h('div', { class: 'example' })));
+    later(() => { if (session.body.isConnected) tts.speak(line.zh, { rate: rate() }); }, 200);
+    paintControls(line, canRecord);
+    return card;
+  }
+
+  function paintControls(line, canRecord) {
+    const controls = [];
+    if (tts.available) {
+      const slowBtn = h('button', { class: `btn btn--sm btn--ghost${slow ? ' is-active' : ''}`, type: 'button', 'aria-pressed': String(slow) }, 'Slower');
+      slowBtn.addEventListener('click', () => {
+        slow = !slow;
+        slowBtn.classList.toggle('is-active', slow);
+        slowBtn.setAttribute('aria-pressed', String(slow));
+        tts.speak(line.zh, { rate: rate() });
+      });
+      const againBtn = h('button', { class: 'btn btn--sm', type: 'button' }, pixelIcon('play', 2), 'Play again');
+      againBtn.addEventListener('click', () => tts.speak(line.zh, { rate: rate() }));
+      controls.push(slowBtn, againBtn);
+    }
+    const controlsRow = h('div', { class: 'row row--wrap ls-dg-controls' }, ...controls);
+    const nextBtn = h('button', { class: 'btn btn--primary btn--lg', type: 'button' }, idx + 1 >= lines.length ? 'Finish' : 'Next line');
+    nextBtn.addEventListener('click', () => { idx += 1; paint(); });
+
+    if (!canRecord) { session.footer.replaceChildren(controlsRow, nextBtn); return; }
+    const turnBtn = h('button', { class: 'btn btn--primary btn--lg', type: 'button' }, 'My turn');
+    turnBtn.addEventListener('click', () => {
+      rec = recordControl({ label: 'Record yourself' });
+      session.body.querySelector('.ls-dg-body')?.append(h('div', { class: 'ls-dg-turn' }, h('p', { class: 'pl-eyebrow' }, 'Your turn'), rec.el));
+      session.footer.replaceChildren(controlsRow, nextBtn);
+    });
+    session.footer.replaceChildren(controlsRow, turnBtn);
+  }
+
+  function paintEnd() {
+    session.setProgress(lines.length, lines.length);
+    const cheer = createBird({ size: 5, mood: 'cheer' });
+    session.body.replaceChildren(h('div', { class: 'pl-win ls-dg-end' },
+      h('div', { class: 'pl-titlebar' }, h('span', { class: 'pl-title' }, 'Dialogue complete'), h('span', { class: 'spacer' })),
+      h('div', { class: 'win-body ls-dg-endbody' },
+        cheer.el,
+        h('h2', { class: 'h2' }, 'Nice work!'),
+        h('p', { class: 'muted' }, `You practiced ${lines.length} line${lines.length === 1 ? '' : 's'}.`))));
+    celebrate(session.body);
+    later(() => cheer.say('做得好！', 2600), 300);
+    session.footer.replaceChildren(h('button', { class: 'btn btn--primary btn--lg', type: 'button', onClick: () => session.close() }, 'Done'));
+  }
+
+  paint();
 }
 
 async function renderDetail(root, id) {
@@ -333,13 +489,13 @@ function paintLesson(root, lesson, myGen) {
     g.explanation ? h('p', null, g.explanation) : null,
     ...(g.examples || []).map(exampleEl)));
 
-  const dialogueBlock = (lesson.dialogue && lesson.dialogue.length)
-    ? h('div', { class: 'stack' }, h('p', { class: 'pl-eyebrow' }, 'Dialogue'),
-        h('div', { class: 'ls-dialogue' }, ...lesson.dialogue.map((d) => h('div', { class: 'ls-dialogue-line' },
-          h('span', { class: 'pl-tag' }, d.speaker || '·'),
-          hanziEl({ hanzi: d.zh, zhuyin: d.zhuyin, pinyin: d.pinyin }, { size: 'md' }),
-          d.translation ? h('span', { class: 'ls-dialogue-tr muted' }, d.translation) : null,
-          speakButton(d.zh || '', { size: 'sm' })))))
+  const dialogueLines = (lesson.dialogue || []).filter((d) => d && d.zh);
+  const dialogueBlock = dialogueLines.length
+    ? h('div', { class: 'stack' },
+        h('div', { class: 'row' },
+          h('p', { class: 'pl-eyebrow grow' }, 'Dialogue'),
+          h('button', { class: 'btn btn--sm btn--primary', type: 'button', onClick: () => startDialogueSession(lesson) }, pixelIcon('mic', 2), 'Practice this dialogue')),
+        h('div', { class: 'ls-dialogue' }, ...dialogueLines.map(dialogueLineEl)))
     : null;
 
   const vocabSection = h('div', { class: 'stack ls-vocab' },
@@ -409,6 +565,8 @@ export default {
   },
   unmount() {
     gen++;
+    clearTimers();
+    tts.stop();
     try { liveSession?.close(); } catch { /* the layer is already gone */ }
     liveSession = null;
   },

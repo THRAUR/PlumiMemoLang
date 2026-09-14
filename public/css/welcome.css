@@ -1,0 +1,147 @@
+/* welcome.css — styles owned by public/js/views/welcome.js. Tokens from plume.css; kit from app.css.
+
+   The welcome questions own the whole screen, like a session: no rail, no top
+   bar, no tab bar. A sticky progress bar on top, Plumi asking, answer cards, and
+   a sticky Continue at the bottom that stays under the thumb.
+
+   Accent budget: a single-select answer lights up in the kit's terracotta
+   (.option.is-selected, one per question) and Continue is the primary action.
+   Multi-select answers can be on several at once, so "on" is INK, never a row
+   of terracotta cards. */
+
+/* ---------- the chrome steps aside ---------- */
+body[data-view="welcome"] .rail,
+body[data-view="welcome"] .topbar,
+body[data-view="welcome"] .tabbar { display: none; }
+/* Without the rail the desktop grid would squeeze the view into the rail's column. */
+body[data-view="welcome"] .app { grid-template-columns: 1fr; }
+body[data-view="welcome"] .view { max-width: none; padding: 0; }
+/* Toasts clear the sticky Continue instead of the (hidden) tab bar. */
+body[data-view="welcome"] #toasts { left: 0; bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+
+.wl { min-height: 100dvh; display: flex; flex-direction: column; }
+.wl-top-in, .wl-main, .wl-foot-in { width: 100%; max-width: 560px; margin: 0 auto; }
+
+/* ---------- top: back + progress ---------- */
+.wl-top {
+  position: sticky; top: 0; z-index: 20;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px 6px;
+  background: var(--bg);
+}
+.wl-top-in { display: flex; align-items: center; gap: 8px; }
+.wl-back { flex: none; }
+
+/* ---------- Plumi asks ---------- */
+.wl-main { flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 6px 16px 28px; }
+.wl-coach { align-items: flex-end; gap: 12px; }
+.wl-coach .bird { flex: none; }
+.wl-bubble { padding: 11px 14px 12px; }
+.wl-bubble.is-new { animation: rise var(--dur-base) var(--ease-out) both; }   /* rise: plume.css */
+.wl-ask { font-size: 20px; line-height: 1.25; }
+.wl-hint { margin-top: 4px; font-size: 14px; line-height: 1.35; color: var(--muted); }
+
+.wl-step { animation: wl-in var(--dur-slow) var(--ease-out) both; }
+.wl-step.is-back { animation-name: wl-back; }
+@keyframes wl-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes wl-back { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+
+/* ---------- answer cards (kit .option) ---------- */
+.wl-options { display: flex; flex-direction: column; gap: 10px; }
+.wl-opt { min-height: 60px; padding: 10px 14px; gap: 14px; }
+.wl-opt-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wl-opt-label { font-size: 17px; font-weight: 700; line-height: 1.25; color: var(--text); }
+.wl-opt-hint { font-size: 14px; line-height: 1.3; color: var(--muted); }
+.wl-ico {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center;
+  border: var(--bw) solid var(--line-strong); border-radius: var(--r-md);
+  background: var(--surface-2); color: var(--text);
+}
+.wl-check {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center;
+  border: var(--bw-strong) solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--bg);
+}
+.wl-check .px { visibility: hidden; }
+.wl-opt.is-on { border-color: var(--text); box-shadow: 2px 2px 0 var(--text); }
+.wl-opt.is-on .wl-check { background: var(--text); border-color: var(--text); }
+.wl-opt.is-on .wl-check .px { visibility: visible; }
+
+/* ---------- how you read: three script cards in a row ---------- */
+.wl-reading { display: flex; flex-direction: column; gap: 18px; }
+.wl-group { display: flex; flex-direction: column; gap: 8px; }
+.wl-scripts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.wl-opt--col { flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-height: 72px; padding: 8px 4px; text-align: center; }
+.wl-opt--col .wl-opt-label { font-size: 15px; }
+.wl-samples { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 6px; }
+.wl-sample { font-size: 13px; color: var(--muted); line-height: 1.3; }
+.wl-sample.zh { letter-spacing: .04em; }
+
+.wl-glyph { flex: none; width: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; color: var(--text); }
+.wl-glyph-py { font-size: 15px; font-weight: 700; }
+.wl-glyph-py.is-zhuyin { font-family: var(--font-zh); font-weight: 500; }
+.wl-glyph-hz { font-family: var(--font-zh); font-size: 13px; color: var(--muted); }
+.wl-glyph--full .wl-glyph-hz { font-size: 26px; color: var(--text); }
+
+.wl-preview { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 116px; padding: 16px; }
+.card.wl-preview > * + * { margin-top: 0; }
+.wl-preview-meaning { font-size: 15px; color: var(--muted); text-align: center; }
+
+/* ---------- why: chips + a note for Plumi ---------- */
+.wl-reasons { display: flex; flex-direction: column; gap: 20px; }
+.wl-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wl-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 8px 14px 8px 10px;
+  background: var(--surface); color: var(--text);
+  border: var(--bw-strong) solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.2; text-align: left;
+  transition: transform var(--dur-fast) var(--ease-snap), box-shadow var(--dur-fast), background var(--dur-fast);
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+@media (hover: hover) { .wl-chip:hover { background: var(--surface-2); } }
+.wl-chip:active { transform: translate(2px, 2px); box-shadow: none; }
+.wl-chip .px { color: var(--faint); }
+.wl-chip.is-on { border-color: var(--text); box-shadow: 2px 2px 0 var(--text); }
+.wl-chip.is-on .px { color: var(--text); }
+.wl-field { gap: 8px; }
+.wl-field-label { font-size: 16px; font-weight: 700; color: var(--text); }
+.wl-about { min-height: 96px; }
+.wl-count-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.wl-count { flex: none; font-size: 12px; color: var(--faint); }
+
+/* ---------- level bars, XP numbers ---------- */
+.wl-bars { flex: none; display: flex; align-items: flex-end; gap: 3px; height: 24px; }
+.wl-bars i { display: block; width: 6px; border-radius: 1px; background: var(--line-strong); }
+.wl-bars i:nth-child(1) { height: 30%; }
+.wl-bars i:nth-child(2) { height: 55%; }
+.wl-bars i:nth-child(3) { height: 80%; }
+.wl-bars i:nth-child(4) { height: 100%; }
+.wl-bars i.is-on { background: var(--text); }
+.wl-xp { flex: none; font-family: var(--font-display); font-size: 22px; font-weight: 700; line-height: 1; color: var(--text); }
+.wl-xp small { margin-left: 4px; font-family: var(--font-label); font-size: 9px; letter-spacing: .06em; color: var(--faint); }
+
+/* ---------- languages: two columns ---------- */
+.wl-langs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.wl-langs .wl-opt { min-height: 52px; padding: 8px 12px; }
+.wl-langs .wl-opt-label { font-size: 16px; }
+
+/* ---------- the plan ---------- */
+.wl-plan { display: flex; flex-direction: column; gap: 12px; }
+.wl-plan-card > * + * { margin-top: 14px; }
+.wl-plan-lead { font-size: 18px; line-height: 1.45; color: var(--text); }
+.wl-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; border-top: var(--bw) solid var(--line); padding-top: 12px; }
+.wl-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wl-fact-v { font-size: 15px; font-weight: 700; line-height: 1.3; }
+.wl-cards .wl-cardrow { gap: 12px; padding: 10px 14px; }
+
+/* ---------- bottom: the one primary action ---------- */
+.wl-foot {
+  position: sticky; bottom: 0; z-index: 20;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface); border-top: var(--bw) solid var(--line);
+}
+
+@media (min-width: 640px) {
+  .wl-main { padding-top: 24px; gap: 22px; }
+  .wl-ask { font-size: 24px; }
+}

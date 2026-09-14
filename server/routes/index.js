@@ -1,7 +1,7 @@
 /* Mounts every router. Each file exports `default router` (an express.Router)
    and is mounted at /api. A router that fails to import is reported and skipped
    so the rest of the app keeps working while one module is being rewritten. */
-export const ROUTERS = ['health', 'settings', 'stats', 'words', 'lessons', 'notes', 'review', 'challenge', 'suggestions', 'jobs', 'backup'];
+export const ROUTERS = ['health', 'settings', 'stats', 'words', 'lessons', 'notes', 'materials', 'review', 'challenge', 'suggestions', 'jobs', 'backup'];
 
 export async function mountRoutes(app) {
   for (const name of ROUTERS) {

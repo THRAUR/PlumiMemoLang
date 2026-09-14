@@ -138,7 +138,7 @@ the files and stores the metadata above. `GET /api/notes/:id/images/:name` serve
   ],
   ai: {
     apiKey: "",                  // never returned by the API; GET gives apiKeyMasked + hasApiKey
-    models: { default: "anthropic/claude-sonnet-4.5", extract: "", suggest: "", enrich: "", explain: "", reading: "" },
+    priority: ["google/gemini-3.5-flash-lite", "google/gemini-3.1-flash-lite", "deepseek/deepseek-v4-flash", "google/gemini-2.5-flash-lite"],  // tried top to bottom; only ids from server/ai/models.js
     monthlyBudgetUsd: 5
   }
 }
@@ -292,9 +292,12 @@ export const TASKS = {
   explain: { id, label: "Explain / ask",     importance: "low" },
   test:    { id, label: "Connection test",   importance: "low" }
 };
-export function resolveModel(settings, taskId) → string        // settings.ai.models[taskId] || settings.ai.models.default
+export function resolveChain(settings, { images, prefer }) → string[] // the allowed models to try, in order (server/ai/models.js)
+export function resolveModel(settings, taskId, opts) → string  // the first model of that chain
 export function resolveApiKey(settings) → string               // settings.ai.apiKey || config.envApiKey
-export async function runTask(taskId, input, { settings, onProgress }) → { result, usage, model }
+export async function runTask(taskId, input, { settings, onProgress, prefer, only }) → { result, usage, model, fallbacks }
+//  Tries each model of the chain in turn: a failure that belongs to one model moves on to the next, a rejected
+//  key or an empty balance stops at once. `prefer` goes first; `only` tries that one model with no backup.
 //  Builds messages + schema for the task, calls openrouter.chat, validates/normalises the result
 //  (fills zhuyin from pinyin with shared/zhuyin.js when missing, trims, dedupes words by hanzi),
 //  appends to coll("usage"). Throws Error("…") with a human message on failure.
@@ -333,8 +336,8 @@ export function getStats() → {
 | `GET /health` | `{ ok: true, version, dataDir }` |
 | `GET /settings` | Settings with `ai.apiKey` removed, plus `ai.apiKeyMasked`, `ai.hasApiKey` |
 | `PUT /settings` | partial Settings (deep-merged; `ai.apiKey` accepted, `""` clears) → same as GET |
-| `GET /models?refresh=1` | `Model[]` (see 4.6) |
-| `POST /ai/test` | `{ model? }` → `{ ok, model, reply, usage }` |
+| `GET /models?refresh=1` | the allowed models only, in the learner's order: `Model` fields (4.6) plus `name, vision, why, rank, recommendedRank, inCatalog` |
+| `POST /ai/test` | `{ model? }` → `{ ok, model, reply, usage, fallbacks }`. With `model`, only that model is tried; without it, the whole list. A model off the list is a 400 |
 | `GET /stats` | see 4.8 |
 | `GET /words?q=&lessonId=&tag=&type=&band=&sort=score|recent|alpha|due&dir=asc|desc` | `{ words: Word[], total, tags: string[] }` (`q` matches hanzi, pinyin (tone-insensitive), zhuyin, meaning, meaningNative, tags) |
 | `POST /words` | WordDraft → `201 Word`, or `200 { word, merged: true }` when `hanzi` already exists (fills empty fields only) |
@@ -357,7 +360,7 @@ export function getStats() → {
 | `PUT /notes/:id` | `{ title?, classDate?, text? }` → Note |
 | `DELETE /notes/:id` | `{ ok }` (deletes uploads) |
 | `GET /notes/:id/images/:name` | the image file |
-| `POST /notes/:id/process` | `{ model? }` → `{ jobId }`; on completion note.status = draft |
+| `POST /notes/:id/process` | `{ model? }`, an allowed model to start with, the rest of the list as backup → `{ jobId }`; on completion note.status = draft |
 | `PUT /notes/:id/draft` | `{ draft }` → Note (the learner edited the draft before importing) |
 | `POST /notes/:id/import` | `{ words: [indexes into draft.words] | "all", lesson: true }` → `{ lessonId, wordIds, mergedHanzi, xp }` |
 | `GET /review/queue?limit=20&lessonId=&newLimit=` | `{ cards: Word[] (each with `preview`), counts, templates: enabled templates }` |
@@ -478,3 +481,246 @@ as the amendment.
   and desktop widths, reporting console errors; `scripts/cdp.mjs` drives headless
   Chromium step by step (click / type / key / shot) for session flows;
   `public/kit.html` is the static kit showcase.
+- **Allowed models (added later the same day).** The OpenRouter key carries a guardrail
+  allow-list, and OpenRouter answers any other model id with 404. `server/ai/models.js`
+  holds the four allowed ids, the recommended order and the reasons for it.
+  `settings.ai.models` (one model per task) is retired: `settings.ai.priority` is the
+  order, `GET /settings` always returns it complete, and `PUT` rejects ids off the list.
+  `runTask()` walks the order and falls back on any failure that belongs to one model;
+  a rejected key or an empty balance stops at once. Photo notes skip text-only models.
+  The extract timeout is 3 min per attempt, so three attempts fit inside the 10 minutes
+  the client waits on a job.
+
+## 8. Goals, speaking-first learning and documents (2026-09-13, evening)
+
+After using the app, the learner reported three things the first build got wrong or
+lacked:
+
+1. On a phone some UI broke: the goal ring's label, the date field in Notes, and more.
+2. They want to SPEAK. Their notes carry characters, pinyin and English; they rely on
+   pinyin and English and keep characters only to check the original meaning. Screens
+   that drill characters do not help them. The app must ask each learner's goals and
+   adapt to them.
+3. They want to upload documents, such as a scanned book as a PDF, pick pages ("9–11 and
+   25"), get one or several lessons from them, keep the document if they agree, and pick
+   new pages from it after a later class.
+
+This section is the contract for that work and is binding like §1–§6.
+
+### 8.1 Settings additions
+
+```js
+settings.goals = {
+  onboardedAt: null,           // ISO string once the welcome questions are answered; null → the app opens #/welcome
+  skills: ['speak', 'listen'], // subset of speak | listen | read | write | type
+  reasons: [],                 // subset of REASONS ids in shared/goals.js
+  classes: 'regular',          // regular | sometimes | none
+  about: '',                   // ≤ 500 chars the AI reads as context ("classes with Carl twice a week")
+}
+settings.display = {
+  hanzi: '',                   // '' (follow the focus) | full | small | hidden: how prominent characters are
+}
+// settings.script stays: pinyin | zhuyin | both, which reading is shown
+```
+
+`cardTemplates` gains the builtin `say` and the new field `record`. `readSettings()`
+normalises the stored list with `normaliseTemplates()`: every builtin is present (missing
+ones appended, disabled), a builtin's name, front and back always follow the code, and
+`enabled` stays the learner's choice. Custom templates are kept as they are.
+
+| id | name | front | back | fits |
+|---|---|---|---|---|
+| recognition | Characters → meaning | hanzi | reading, meaning, example | characters |
+| production | Meaning → characters | meaning | hanzi, reading, example | characters |
+| say | Say it | meaning, record | reading, audio, example, hanzi | speaking |
+| sound | Reading → meaning | reading | meaning, audio, example, hanzi | speaking |
+| listening | Listen | audio | meaning, reading, hanzi | speaking |
+| cloze | Fill the blank | cloze | hanzi, reading, example | characters |
+
+`record` renders `recordControl()` from `public/js/speech.js`. When the learner recorded on
+the front, the back shows "Play mine" next to the model's audio.
+
+### 8.2 `shared/goals.js` (pure; Node and browser)
+
+```js
+export const SKILLS            // [{ id, label, hint }]  speak, listen, read, write, type
+export const REASONS           // [{ id, label }]
+export const CLASSES           // [{ id, label }]  regular, sometimes, none
+export const HANZI_MODES       // ['full', 'small', 'hidden']
+export const TEMPLATE_FIELDS   // hanzi, reading, meaning, example, audio, cloze, notes, tags, record
+export const BUILTIN_TEMPLATES // the table above, without `enabled`
+export const CHALLENGE_TYPES   // [{ id, label, fits: 'speaking' | 'characters' | 'both' }]
+export const DEFAULT_GOALS
+export function normaliseGoals(raw) → goals
+export function focusOf(goals) → 'speaking' | 'characters' | 'balanced'
+export function defaultHanziMode(focus) → 'small' | 'full'
+export function recommendedTemplates(focus) → string[]
+export function recommendedChallengeTypes(focus) → string[]
+export function normaliseTemplates(list) → template[]
+export function learnerProfile(settings) → { goals, focus, speaking, characters, hanzi, script, templates, challengeTypes, onboarded }
+```
+
+Focus is `speaking` when skills include speak or listen and neither read nor write;
+`characters` when they include read or write and neither speak nor listen; `balanced`
+otherwise, including no answer yet. Typing does not change the focus.
+
+Recommended templates: speaking → say, listening, sound; characters → recognition,
+production, cloze; balanced → recognition, say, listening.
+
+### 8.3 Display rules (client)
+
+`public/js/ui.js` exposes `profile()` (the learnerProfile of the live settings) and
+`hanziMode()`. `public/js/hanzi.js` adds:
+
+- `wordHero(word, { size: 'xl' | 'lg' | 'md' | 'sm' })`: the word as the hero of a card. In
+  `full` mode it is the existing ruby hanzi. In `small` mode the reading is large
+  (pinyin in JetBrains Mono, zhuyin in the CJK face) with the characters small and muted
+  underneath. In `hidden` mode it is the reading only.
+- `wordLine(word)`: the compact form for list rows, primary text plus secondary, by the
+  same rules.
+- `exampleEl(example, { speak })`: an example sentence. In speaking focus the reading
+  line comes first and larger, then the translation, then the characters small.
+
+Every screen that shows a word as its main content uses these. `hanziEl` stays for places
+where characters ARE the question: the recognition template, cloze and mc-hanzi.
+
+### 8.4 Speaking practice
+
+`public/js/speech.js`:
+
+```js
+export const recording           // { supported }: getUserMedia + MediaRecorder + secure context
+export function createRecorder({ maxMs })  // { start(), stop() → Promise<{ url, blob, ms }>, cancel(), release(), state }
+export function recordControl({ label, maxMs, onTake })  // { el, take, reset(), destroy() }: mic button, timer, "Play mine"
+export const recognition         // { supported }: SpeechRecognition / webkitSpeechRecognition
+export function listenOnce({ lang = 'zh-TW', timeoutMs })  // Promise<{ text, alternatives, confidence }>
+export function hanziMatch(heard, expected) → 0..1  // share of the expected characters heard, in order
+```
+
+Recording needs a secure context. The live app is HTTPS through tailscale, and localhost
+counts as secure. With no microphone or no permission the control hides or explains;
+with no recognition the learner grades themselves.
+
+New challenge question types in `server/lib/challenge.js`:
+
+```js
+{ type: 'listen-meaning', id, wordId, prompt: { tts, pinyin, zhuyin, hanzi }, options: [{ id, text }], answerId }
+{ type: 'mc-pinyin',     id, wordId, prompt: { meaning, hanzi }, options: [{ id, pinyin, zhuyin }], answerId }   // distractors include a tone variant
+{ type: 'tones',         id, wordId, prompt: { tts, bare, meaning, hanzi }, options: [{ id, pinyin }], answerId } // bare = pinyin without marks
+{ type: 'order-pinyin',  id, wordId, prompt: { translation, tts }, tiles: [{ id, text }], answer: [ids], full: { zh, pinyin } }
+{ type: 'speak',         id, wordId, prompt: { meaning, context }, answer: { pinyin, zhuyin, hanzi, tts } }
+```
+
+`match` pairs also carry `pinyin` and `zhuyin`. `POST /challenge/build` accepts `focus`;
+without `types` the defaults are `recommendedChallengeTypes(focus)`. The client renders
+every type by the display rules: in speaking focus `mc-meaning` shows the reading as the
+prompt, `type-pinyin` shows the meaning, and `match` pairs readings with meanings.
+
+Build notes from the speaking work: `mc-meaning` prompts also carry `pinyin` and `zhuyin`;
+a hand-picked `types` list the pool cannot build is a 400 that says so; types are ordered
+from recognising to producing, with a seeded pick when there are more types than
+questions. Tone variants change exactly one syllable and never touch 不 or 一, a neutral
+tone, or a 2↔3 change before a third tone, because tone sandhi (nǐ hǎo is said ní hǎo)
+would mark a good ear wrong. `server/lib/challenge.js` also exports `toneVariants`,
+`bareReading`, `readingsOf` and `FOCI`.
+
+### 8.5 AI: goals in every prompt, several lessons from one source
+
+- `learnerFrom()` adds `goals`, `focus` and `hanzi`. `systemPrompt()` describes them. In
+  speaking focus it asks for phrases and sentence patterns the learner can say today,
+  natural spoken Taiwanese Mandarin, example sentences short enough to repeat (about 14
+  syllables at most), tone and tone-sandhi notes where useful, and no stroke-order or
+  radical trivia. Every Chinese string still gets characters, pinyin and zhuyin.
+- `extract` returns `{ lessons: [ { lesson, words } ] }` with 1 to 4 lessons. Input gains
+  `split: 'one' | 'auto' | 'per-range'`, `pages: [{ pdf, printed }]` and `instructions`.
+  `one` means exactly one lesson, `per-range` one lesson per page range, and `auto` one per
+  coherent unit or topic, at most 4. Notes without a document use `one`.
+- A draft stored before this change (`{ lesson, words }`) is read as
+  `{ lessons: [ { lesson, words } ] }` everywhere.
+
+### 8.6 Documents (materials)
+
+Data: `data/materials.json` (array). Files live under `data/materials/<id>/`: `source.pdf`
+and a `thumbs/` cache.
+
+```js
+Material {
+  id, title, fileName, size, pageCount,
+  kind: 'pdf',                  // office files are converted to PDF on upload
+  keep: true,                   // the learner agreed to keep it in the library
+  pageOffset: 0,                // printed page p is PDF page p + pageOffset
+  textLayer: false,             // pdftotext found text on the first pages
+  covered: [ { pages: [9, 10, 11, 25], lessonIds: [], noteId, at } ],   // PDF numbering
+  createdAt, updatedAt
+}
+```
+
+Documents need poppler (`pdfinfo`, `pdftoppm`, `pdftotext`); office conversion needs
+`soffice`. Both are probed at boot. The UI hides what the box cannot do and says why.
+
+| Method & path | Body → Response |
+|---|---|
+| `GET /capabilities` | `{ documents, office, officeTypes, reasons: { documents?, office? } }`. `officeTypes` lists the extensions this machine converts: here .pptx, .ppt and .odp, because LibreOffice has Impress but no Writer |
+| `POST /materials?name=&title=&keep=1\|0` | raw file bytes, streamed (PDF; .docx .doc .pptx .ppt .odt .odp .rtf when office), ≤ 500 MB → `201 Material` |
+| `GET /materials` | `{ materials }`: kept ones plus ones a note still uses, newest first |
+| `GET /materials/:id` | Material |
+| `PUT /materials/:id` | `{ title?, keep?, pageOffset? }` → Material |
+| `DELETE /materials/:id` | `{ ok }`; lessons and notes made from it stay |
+| `GET /materials/:id/file` | the PDF, inline |
+| `GET /materials/:id/pages/:n/thumb?w=240` | `image/jpeg` of PDF page n (1-based), w from 120 to 800, cached |
+| `POST /materials/:id/lessons` | `{ pages: "9-11, 25", numbering: "printed" \| "pdf", split, instructions, title?, classDate?, model? }` → `{ noteId, jobId, pages }` |
+
+`POST /materials/:id/lessons` creates a Note that points at the pages
+(`note.source = { materialId, title, pages, printed, split }`, with `note.text` holding the
+instructions) and starts the same job as `POST /notes/:id/process`. That job renders each
+page to JPEG (at most 1600 px) and adds the page's text layer when there is one. At most
+20 pages per run. On import, `material.covered` records the pages. A material with
+`keep: false` is deleted once its note is imported or deleted.
+
+`shared/pages.js` (pure): `parsePages(text, { max, limit })` returns sorted page numbers
+and accepts "9-11, 25", "9–11 and 25", "pages 9 to 11, p. 25" and "第9到11頁、25"; it throws
+an Error with a human sentence on nonsense. Also `formatPages(pages)` → "9–11, 25",
+`groupRanges(pages)` → `[[9, 11], [25, 25]]`, `printedToPdf(pages, offset)` and
+`pdfToPrinted(pages, offset)`.
+
+Notes API changes: list rows add `source` and `draftLessons`; `GET /notes/:id` returns
+the draft in the lessons shape; `PUT /notes/:id/draft` takes `{ draft: { lessons } }`;
+`POST /notes/:id/import` takes `{ lessons: [ { words: "all" | number[], skip?: boolean } ] }`,
+where the legacy `{ words, lesson }` still means the first lesson, and returns
+`{ lessonIds, lessonId, wordIds, mergedHanzi, created, xp, stats }`.
+
+### 8.7 Onboarding
+
+`#/welcome` (view id `welcome`) asks one question per screen, full-screen with a progress
+bar and Plumi, Duolingo-style: skills (multi) → how they read Chinese (script and how
+prominent characters are) → reasons (multi) and "anything Plumi should know" → classes →
+level → daily goal → explanation language → done. Finishing sends one
+`PUT /api/settings` with `goals` (including `onboardedAt`), `script`, `display`, `level`,
+`dailyGoalXp`, `nativeLanguage` and `cardTemplates` with the recommended templates
+enabled. `app.js` sends a learner whose `goals.onboardedAt` is null to `#/welcome` once per
+page load. Settings gets a "Your goals" panel with the same answers and an "Ask me again"
+button.
+
+### 8.8 Phone rules (every view)
+
+- Hover styles live inside `@media (hover: hover)`, so a tapped button never stays grey.
+- Text inputs, selects and textareas are at least 16 px, or iOS zooms in.
+- Date inputs use the kit rule in app.css, because iOS draws them wider than their box.
+- Nothing overlaps a stroke or leaves its box at 375 px; long pinyin wraps.
+- While a text field has focus on a phone, the tab bar hides so the keyboard cannot push
+  it over the field.
+- Check at 375×667, 390×844 and 430×932 with `scripts/cdp.mjs`. Playwright's WebKit cannot run on this
+  machine (missing GTK 4 and GStreamer libraries), so iOS-only behaviour is handled from known Safari rules.
+
+### 8.9 Known follow-ups
+
+- `listenOnce()` has no cancel: a check still listening when a card changes keeps the
+  microphone open until its timeout. Add an AbortSignal and wire it in review, challenge
+  and Words, which each carry their own "Check me" today and could share one control.
+- `recordControl()` has no `stop()`; callers stop a take by clicking its button.
+- iOS Safari speaks only after a first utterance from a tap. Review and challenge speak a
+  silent one on Start; a shared `tts.unlock()` would make that one rule.
+- `readingFor()`, `wordHero()` and `wordLine()` could take an explicit script, so the
+  welcome flow can preview an unsaved choice without building a stripped-down word.
+- Speech recognition may answer in Simplified characters, which lowers `hanziMatch()`;
+  it only advises, so the learner still decides.

@@ -1,7 +1,8 @@
 /* The one door to the models. Every AI call in the app goes through runTask()
    so that four things stay in a single place:
 
-     - model routing      which model does which job (importance-based)
+     - model order        the allowed models in ./models.js, tried top to bottom;
+                          when one fails, the next one takes over
      - the key            settings.ai.apiKey, else OPENROUTER_API_KEY, else a
                           sentence telling the learner where to paste one
      - normalisation      what a model returns is *suggested* data, never trusted:
@@ -15,8 +16,11 @@ import { config } from '../config.js';
 import { coll, doc } from '../store.js';
 import { DEFAULT_SETTINGS, deepMerge, isPlain } from '../defaults.js';
 import { chat } from '../openrouter.js';
+import { modelChain, isAllowedModel, modelName } from './models.js';
 import { buildMessages, SCHEMAS, POS, WORD_TYPES, SECTION_KINDS } from './prompts.js';
 import { pinyinToZhuyin, zhuyinToPinyin } from '../../shared/zhuyin.js';
+import { learnerProfile } from '../../shared/goals.js';
+import { LESSONS_MAX } from './prompts.js';
 
 const usageLog = coll('usage');
 
@@ -25,8 +29,9 @@ const TAGS_CAP = 8;
 const WORDS_CAP = 60;        // a class produces 6–40; 60 means the model ran away
 const SECTIONS_CAP = 12;
 
-/* `why` is shown next to the model picker in Settings: it is the argument for
-   spending more on one task than on another. */
+/* `importance` and `why` say what each task is worth. Since the key was limited
+   to four models, every task walks the same list (./models.js) instead of
+   picking its own; a task still sets its budget, tone and timeout. */
 export const TASKS = {
   extract: {
     id: 'extract',
@@ -34,8 +39,11 @@ export const TASKS = {
     importance: 'high',
     why: 'Turns your notes into your whole lesson; mistakes here are learned.',
     defaultTemperature: 0.2,
-    maxTokens: 8000,
-    timeoutMs: 300000,           // photos + a long lesson; phones poll a job anyway
+    // Several lessons from one source, each with up to 40 words and their examples.
+    maxTokens: 16000,
+    // Per attempt. Three photo-capable models at 3 min each stays inside the
+    // 10 minutes a phone waits on the job before it gives up.
+    timeoutMs: 180000,
     progress: 'Reading your notes…',
     progressAfter: 'Building the lesson…',
   },
@@ -107,10 +115,17 @@ function resolveSettings(settings) {
   return deepMerge(DEFAULT_SETTINGS, base);
 }
 
-export function resolveModel(settings, taskId) {
-  const models = resolveSettings(settings)?.ai?.models || {};
-  const chosen = str(models[taskId]) || str(models.default);
-  return chosen || DEFAULT_SETTINGS.ai.models.default;
+/* The models one call will try, in order: the learner's priority list, always
+   complete and always inside the allow-list (./models.js), with `prefer` moved
+   to the front and text-only models dropped when photos ride along. */
+export function resolveChain(settings, { images = false, prefer = '' } = {}) {
+  return modelChain(resolveSettings(settings)?.ai?.priority, { images, prefer });
+}
+
+/* The model a call starts with. Every task shares one list, so `taskId` is
+   kept for the signature and only `opts.images` changes the answer. */
+export function resolveModel(settings, taskId, opts = {}) {
+  return resolveChain(settings, opts)[0] || '';
 }
 
 /* The learner's own key wins over the one in .env: they pasted it last. */
@@ -128,7 +143,12 @@ export function hasApiKey(settings) {
 function learnerFrom(settings, input) {
   const s = resolveSettings(settings);
   const l = isPlain(input?.learner) ? input.learner : {};
+  // Goals come from settings only: they describe the learner, not one request.
+  const profile = learnerProfile(s);
   return {
+    goals: profile.goals,
+    focus: profile.focus,
+    hanzi: profile.hanzi,
     nativeLanguage: str(l.nativeLanguage) || str(input?.nativeLanguage) || str(s.nativeLanguage) || 'en',
     level: str(l.level) || str(input?.level) || str(s.level) || 'beginner',
     script: str(l.script) || str(input?.script) || str(s.script) || 'zhuyin',
@@ -137,13 +157,25 @@ function learnerFrom(settings, input) {
 
 /* ── the call ────────────────────────────────────────────────────────────── */
 
-export async function runTask(taskId, input = {}, { settings, onProgress, signal, timeoutMs } = {}) {
+export async function runTask(taskId, input = {}, { settings, onProgress, signal, timeoutMs, prefer = '', only = false } = {}) {
   const task = TASKS[taskId];
   if (!task) throw new Error(`Unknown AI task: ${taskId}`);
 
   const s = resolveSettings(settings);
-  const model = resolveModel(s, taskId);
   const apiKey = resolveApiKey(s);            // throws the human "add your key" line
+  const wanted = str(prefer);
+  // The key's guardrail refuses every other model, so an id from anywhere else
+  // (an old tab, a hand-written request) stops here instead of at OpenRouter.
+  if (wanted && !isAllowedModel(wanted)) throw new Error(`${wanted} is not on the allowed model list.`);
+  // Only extract carries photos. A text-only model would refuse them or, worse,
+  // answer confidently from the typed notes alone.
+  const images = Array.isArray(input?.images) && input.images.length > 0;
+  // `only` is the per-model connection test: a dead model must show up as dead,
+  // not be hidden by the next one answering for it.
+  const chain = only && wanted ? [wanted] : resolveChain(s, { images, prefer: wanted });
+  if (!chain.length) {
+    throw new Error(images ? 'None of the allowed models can read photos.' : 'No allowed model is available.');
+  }
   const learner = learnerFrom(s, input);
   const say = (text) => {
     if (!text || typeof onProgress !== 'function') return;
@@ -152,34 +184,64 @@ export async function runTask(taskId, input = {}, { settings, onProgress, signal
 
   const messages = buildMessages(taskId, input, learner);
   const schema = SCHEMAS[taskId] || null;
-  const started = Date.now();
-  let usage = null;
+  const failures = [];
 
   say(task.progress);
-  try {
-    const out = await chat({
-      apiKey,
-      model,
-      messages,
-      schema,
-      schemaName: taskId,
-      temperature: task.defaultTemperature,
-      maxTokens: task.maxTokens,
-      timeoutMs: timeoutMs || task.timeoutMs,
-      signal,
-    });
-    usage = out.usage;
-    say(task.progressAfter);
-    const result = normalise(taskId, out, input, learner);
-    logUsage({ task: taskId, model: out.model || model, usage, ms: Date.now() - started, ok: true });
-    return { result, usage, model: out.model || model };
-  } catch (e) {
-    const message = humanMessage(e, taskId);
-    // The learner paid for the tokens even when the answer was unusable, so the
-    // failure is logged with whatever usage the call reported.
-    logUsage({ task: taskId, model, usage: usage || e?.usage, ms: Date.now() - started, ok: false, error: message });
-    throw e?.message === message ? e : Object.assign(new Error(message), { cause: e });
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    const started = Date.now();
+    let usage = null;
+    try {
+      const out = await chat({
+        apiKey,
+        model,
+        messages,
+        schema,
+        schemaName: taskId,
+        temperature: task.defaultTemperature,
+        maxTokens: task.maxTokens,
+        timeoutMs: timeoutMs || task.timeoutMs,
+        signal,
+      });
+      usage = out.usage;
+      say(task.progressAfter);
+      const result = normalise(taskId, out, input, learner);
+      logUsage({ task: taskId, model: out.model || model, usage, ms: Date.now() - started, ok: true });
+      return { result, usage, model: out.model || model, fallbacks: failures };
+    } catch (e) {
+      const message = humanMessage(e, taskId);
+      // The learner paid for the tokens even when the answer was unusable, so
+      // every failed attempt is logged with whatever usage it reported.
+      logUsage({ task: taskId, model, usage: usage || e?.usage, ms: Date.now() - started, ok: false, error: message });
+      failures.push({ model, error: message });
+      const next = chain[i + 1];
+      if (next && canFallBack(e, signal)) {
+        say(`${modelName(model)} failed. Trying ${modelName(next)}…`);
+        continue;
+      }
+      throw finalError(e, message, failures);
+    }
   }
+  throw new Error('No allowed model is available.');   // unreachable: the loop returns or throws
+}
+
+/* A failure that belongs to one model (down, rate-limited, refused by the key's
+   allow-list, too slow, an unusable answer) moves on to the next model. One that
+   would repeat identically on every model stops at once: a rejected key, an
+   empty balance, or the learner cancelling. */
+function canFallBack(e, signal) {
+  if (signal?.aborted) return false;
+  const status = Number(e?.status ?? e?.cause?.status) || 0;
+  if (status === 401 || status === 402) return false;
+  return !/rejected the API key|out of credits|Cancelled/i.test(String(e?.message || ''));
+}
+
+/* One failure keeps its own words. Several say which models were tried, so the
+   learner can see the backups ran before anything reached them. */
+function finalError(e, message, failures) {
+  if (failures.length <= 1) return e?.message === message ? e : Object.assign(new Error(message), { cause: e });
+  const tried = failures.map((f) => modelName(f.model)).join(', ');
+  return Object.assign(new Error(`Every model on your list failed (${tried}). The last one said: ${message}`), { cause: e, failures });
 }
 
 function humanMessage(e, taskId) {
@@ -346,11 +408,26 @@ function wordDrafts(value, ctx) {
   return dedupeWords(drafts).slice(0, WORDS_CAP);
 }
 
+/* Several lessons folded into one, for a learner who asked for exactly one. The
+   first lesson's title and summary win; everything else is concatenated and the
+   words are deduped the same way as within a lesson. */
+function mergeLessons(list) {
+  const [first, ...rest] = list;
+  const lesson = { ...first.lesson };
+  for (const key of ['sections', 'grammar', 'dialogue']) {
+    lesson[key] = list.flatMap((x) => x.lesson[key] || []);
+  }
+  if (!lesson.summary) lesson.summary = rest.map((x) => x.lesson.summary).find(Boolean) || '';
+  const words = dedupeWords(list.flatMap((x) => x.words.map((w) => ({ ...w, examples: [...w.examples], tags: [...w.tags] })))).slice(0, WORDS_CAP);
+  return { lesson, words };
+}
+
 /* ── per-task normalisation ──────────────────────────────────────────────── */
 
 function unusable(taskId, what) {
-  const label = TASKS[taskId]?.label || taskId;
-  return new Error(`The model did not return ${what}. Try again, or choose a stronger model for "${label}" in Settings.`);
+  // No advice here: runTask() moves on to the next model by itself, and the
+  // final error names every model it tried.
+  return new Error(`The model did not return ${what}.`);
 }
 
 function normalise(taskId, out, input, learner) {
@@ -370,24 +447,37 @@ function normalise(taskId, out, input, learner) {
   if (!isPlain(json)) throw unusable(taskId, 'a JSON object');
 
   if (taskId === 'extract') {
-    if (!isPlain(json.lesson) && !Array.isArray(json.words)) {
-      throw unusable(taskId, 'a lesson (no "lesson" or "words" key)');
-    }
+    // A model that ignored the new shape and answered one { lesson, words } is
+    // still one usable lesson.
+    const raw = Array.isArray(json.lessons) ? json.lessons
+      : isPlain(json.lesson) || Array.isArray(json.words) ? [{ lesson: json.lesson, words: json.words }] : null;
+    if (!raw) throw unusable(taskId, 'any lessons (no "lessons" key)');
     const knownSet = knownSetOf(input?.knownHanzi);
-    const l = isPlain(json.lesson) ? json.lesson : {};
-    const lesson = {
-      title: str(l.title) || str(input?.title) || 'Untitled lesson',
-      titleZh: str(l.titleZh ?? l.title_zh),
-      summary: str(l.summary),
-      sections: sectionList(l.sections),
-      grammar: grammarList(l.grammar),
-      dialogue: dialogueList(l.dialogue),
-    };
-    const words = wordDrafts(json.words, { knownSet, english });
-    if (!words.length && !lesson.summary && !lesson.sections.length) {
-      throw unusable(taskId, 'anything usable from those notes');
+    let lessons = [];
+    for (const item of raw) {
+      if (!isPlain(item)) continue;
+      const l = isPlain(item.lesson) ? item.lesson : {};
+      const lesson = {
+        title: str(l.title),
+        titleZh: str(l.titleZh ?? l.title_zh),
+        summary: str(l.summary),
+        sections: sectionList(l.sections),
+        grammar: grammarList(l.grammar),
+        dialogue: dialogueList(l.dialogue),
+      };
+      const words = wordDrafts(item.words, { knownSet, english });
+      if (!words.length && !lesson.summary && !lesson.sections.length) continue;
+      lessons.push({ lesson, words });
     }
-    return { lesson, words };
+    if (!lessons.length) throw unusable(taskId, 'anything usable from that material');
+    // "One lesson" is the learner's instruction, not a suggestion.
+    if ((input?.split || 'one') === 'one' && lessons.length > 1) lessons = [mergeLessons(lessons)];
+    lessons = lessons.slice(0, LESSONS_MAX);
+    const fallback = str(input?.title) || 'Untitled lesson';
+    lessons.forEach(({ lesson }, i) => {
+      if (!lesson.title) lesson.title = lessons.length > 1 ? `${fallback} · ${i + 1}` : fallback;
+    });
+    return { lessons };
   }
 
   if (taskId === 'suggest') {

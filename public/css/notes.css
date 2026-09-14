@@ -3,7 +3,48 @@
    Mobile first: every row here is a column at 390px and only spreads out
    when there is width to spend. The one terracotta in each region is the
    primary button (Save notes / Turn into a lesson / Import), so nothing
-   else in this file may reach for --accent as decoration. */
+   else in this file may reach for --accent as decoration.
+
+   notes.js has parts now (notes-docs.js, notes-draft.js, notes-kit.js) and
+   they share this sheet. Documents bring their own primaries (Choose a file /
+   Upload / Make lessons) and one highlight per region: the active tab, the
+   chosen keep option, the active segment. */
+
+/* ---------- phone: nothing leaves its box ----------
+   The kit's .grid-2 tracks are `1fr`, whose automatic minimum is the widest
+   thing inside. iOS draws a date input at its own intrinsic width, which pushed
+   the class date past the edge of its card. minmax(0, 1fr) lets the track, and
+   the field in it, shrink to the column; the kit's date rule does the rest. */
+body[data-view="notes"] .grid-2 { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) {
+  body[data-view="notes"] .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+body[data-view="notes"] .field { min-width: 0; }
+
+/* ---------- Class notes | Documents ---------- */
+.nt-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+@media (min-width: 640px) { .nt-tabs { width: min(100%, 440px); } }
+.nt-tabs a {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 8px 10px;
+  border-right: var(--bw) solid var(--line);
+  font-family: var(--font-label); font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); text-align: center; text-decoration: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.nt-tabs a:last-child { border-right: 0; }
+.nt-tabs a .px { color: currentColor; }
+.nt-tabs a.is-active { background: var(--accent-dim); color: var(--accent-text); }
+@media (hover: hover) { .nt-tabs a:not(.is-active):hover { background: var(--surface-2); color: var(--text); text-decoration: none; } }
+
+/* A segmented choice that fills its field. A label like "One per page range"
+   wraps to two lines inside its 44 px button instead of pushing the control
+   past the edge of a phone. */
+.nt-seg { display: grid; width: 100%; }
+.nt-seg--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nt-seg--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.nt-seg button { min-height: 44px; padding: 8px 6px; white-space: normal; line-height: 1.35; text-align: center; text-wrap: balance; }
+@media (hover: hover) { .nt-seg button:not(.is-active):hover { background: var(--surface-2); color: var(--text); } }
 
 /* ---------- compose: photos ---------- */
 
@@ -46,7 +87,7 @@
   color: var(--muted);
   padding: 0;
 }
-.nt-thumb-x:hover { background: var(--surface); color: var(--text); }
+@media (hover: hover) { .nt-thumb-x:hover { background: var(--surface); color: var(--text); } }
 .nt-thumb-meta {
   display: block;
   padding: 4px 6px;
@@ -74,6 +115,9 @@
 
 .nt-row { align-items: flex-start; padding: 12px 14px; }
 .nt-row .grow { display: flex; flex-direction: column; gap: 4px; }
+.nt-row--center { align-items: center; }
+.nt-row > .px { flex: none; color: var(--faint); }
+.nt-row.is-gone { opacity: .6; }
 .nt-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .nt-row-title {
   font-family: var(--font-display); font-size: 16px; font-weight: 700;
@@ -85,6 +129,8 @@
 }
 .nt-row-shots { display: inline-flex; align-items: center; gap: 5px; }
 .nt-row-shots .px { color: var(--faint); }
+.nt-row-doc { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.nt-row-doc .px { color: var(--faint); }
 .nt-row-excerpt {
   display: block;
   font-size: 13px; color: var(--muted);
@@ -108,6 +154,10 @@
   font-size: 15px; line-height: 1.55;
   color: var(--muted);
 }
+
+/* A note made from a document says where it came from. */
+.nt-source-row { align-items: center; }
+.nt-source p { font-size: 15px; color: var(--text); overflow-wrap: anywhere; }
 
 /* ---------- photo gallery ---------- */
 .nt-gallerybox { display: flex; flex-direction: column; gap: 10px; }
@@ -134,10 +184,13 @@
 .nt-error p { color: var(--text); word-break: break-word; }
 .nt-nokey .muted { font-size: 15px; }
 .nt-warn { color: var(--warn); }
+.nt-stalled .coach, .nt-unavailable .coach, .nt-upload .coach { align-items: center; }
 
 /* ---------- draft: lesson preview ---------- */
 .nt-draft { --gap: 14px; }
+.nt-draft-lead { font-size: 15px; }
 .nt-preview > * + * { margin-top: 14px; }
+.nt-content > * + * { margin-top: 14px; }
 .nt-section { padding-top: 2px; }
 .nt-section > * + * { margin-top: 8px; }
 .nt-section-zh { font-size: 17px; color: var(--muted); }
@@ -153,24 +206,45 @@
 
 .nt-dialogue { display: flex; flex-direction: column; gap: 12px; }
 .nt-line { display: flex; gap: 10px; align-items: flex-start; }
-.nt-line .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nt-line .grow { min-width: 0; }
+.nt-line .example { border-left: 0; padding: 0; }
 .nt-speaker {
   flex: none;
-  width: 26px; height: 26px;
+  min-width: 26px; max-width: 7em; height: 26px; padding: 0 5px;
   display: grid; place-items: center;
   border: var(--bw) solid var(--line-strong); border-radius: var(--r-sm);
   background: var(--surface-2);
   font-family: var(--font-label); font-size: 9px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.nt-line-zh { font-size: 19px; }
-.nt-line-tr { font-size: 14px; color: var(--muted); }
+
+/* ---------- draft: one card per lesson ---------- */
+.nt-lesson .pl-titlebar { gap: 6px; }
+/* The collapse control sits in the striped title bar, so it paints the bar's
+   own colour and the stripes stop at its edge, as they do at the title.
+   32 px of ink, 44 px of touch through ::after. */
+.nt-lesson .pl-titlebar .nt-lesson-toggle {
+  position: relative; width: 40px; height: 32px; min-height: 32px;
+  background: var(--surface-2); color: var(--muted);
+}
+.nt-lesson-toggle::after { content: ""; position: absolute; inset: -6px -2px; }
+.nt-lesson-head > * + * { margin-top: 6px; }
+.nt-lesson-title { overflow-wrap: anywhere; }
+.nt-lesson-zh { font-size: 17px; color: var(--muted); }
+.nt-lesson-summary { font-size: 15px; }
+.nt-lesson-count { font-family: var(--font-label); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.nt-lesson-detail > * + * { margin-top: 16px; }
+.nt-lesson.is-skipped .win-body { background: var(--sunk); }
+.nt-lesson.is-skipped .nt-lesson-head { opacity: .6; }
+.nt-skip { padding-top: 4px; border-top: var(--bw) solid var(--line); font-size: 15px; }
+.nt-words-box > * + * { margin-top: 10px; }
+.nt-words-head .pl-eyebrow { flex: 1; min-width: 0; }
+.nt-editor-examples { --gap: 10px; }
 
 /* ---------- draft: the word list ---------- */
 .nt-word { align-items: flex-start; padding: 10px 8px 10px 4px; gap: 6px; }
 .nt-check { flex: none; width: 44px; justify-content: center; margin: 0; }
 .nt-word-main { display: flex; flex-direction: column; gap: 3px; padding-top: 9px; }
-.nt-word-top { gap: 6px 10px; }
-.nt-word-top .reading { font-size: 14px; }
 .nt-word-meaning { gap: 4px 8px; font-size: 15px; color: var(--text); }
 .nt-word-native { font-style: italic; }
 /* A .btn--sm icon is 34px of ink; ::after lends it a 44px touch area
@@ -199,7 +273,136 @@
 }
 
 /* ---------- imported ---------- */
-.nt-imported .px { color: var(--green); }
+/* Only the check is sage: it is the "done" state. The lesson rows keep ink. */
+.nt-imported-head .px { color: var(--green); }
+
+/* ---------- documents: the upload card ---------- */
+.nt-filechip {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 8px 6px 8px 12px;
+  border: var(--bw) solid var(--line-strong); border-radius: var(--r-md);
+  background: var(--sunk);
+}
+.nt-filechip > .px { flex: none; color: var(--muted); }
+.nt-filechip .grow { display: flex; flex-direction: column; min-width: 0; }
+.nt-filechip-name { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt-filechip-size { font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
+
+.nt-consent-q { font-size: 15px; font-weight: 700; line-height: 1.4; margin-bottom: 10px; }
+.nt-choices { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+@media (min-width: 560px) { .nt-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.nt-choice { align-items: flex-start; min-height: 64px; cursor: pointer; }
+.nt-choice input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
+.nt-choice .grow { display: flex; flex-direction: column; gap: 3px; }
+.nt-choice-title { font-family: var(--font-display); font-size: 16px; font-weight: 700; line-height: 1.2; }
+.nt-choice-text { font-size: 14px; line-height: 1.4; color: var(--muted); }
+.nt-upload-why { text-align: center; }
+
+.nt-note-error {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border: var(--bw) solid var(--error-line); border-radius: var(--r-md);
+  background: var(--error-dim); color: var(--error);
+}
+.nt-note-error > .px { flex: none; margin-top: 4px; }
+.nt-note-error p { font-size: 15px; color: var(--text); overflow-wrap: anywhere; }
+
+.nt-uploading { display: flex; flex-direction: column; gap: 10px; }
+.nt-up-numbers { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.nt-up-amount { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.nt-up-pct { font-family: var(--font-display); font-size: 22px; font-weight: 700; line-height: 1; }
+.nt-up-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.nt-up-foot .help { flex: 1; min-width: 180px; }
+
+/* ---------- documents: the library ---------- */
+.nt-library { display: flex; flex-direction: column; gap: 10px; }
+.nt-doc-row { padding: 12px 10px 12px 12px; }
+.nt-doc-row .grow { display: flex; flex-direction: column; gap: 3px; }
+.nt-doc-row > .px { flex: none; color: var(--faint); }
+/* A page-shaped tile, so a document never reads as a note. */
+.nt-doc-icon {
+  flex: none; width: 40px; height: 48px;
+  display: grid; place-items: center;
+  border: var(--bw) solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-2); color: var(--muted);
+}
+.nt-doc-icon--lg { width: 52px; height: 62px; }
+.nt-doc-covered { font-size: 13px; color: var(--muted); }
+
+/* ---------- documents: one document ---------- */
+.nt-dochead-top { align-items: flex-start; }
+/* On a phone the title needs the row more than the icon does: the tag and the
+   page count below it already say what this is. */
+@media (max-width: 480px) { .nt-dochead .nt-doc-icon { display: none; } }
+.nt-dochead .nt-doc-covered { font-size: 15px; color: var(--text); }
+.nt-keep .seg { max-width: 360px; }
+
+/* ---------- documents: the page picker ---------- */
+.nt-pages-help.is-error { font-size: 14px; color: var(--error); }
+/* The previews scroll sideways inside the card, never the page: twenty pages
+   side by side would be 2,000 px of phone. */
+.nt-pages {
+  display: flex; gap: 10px;
+  overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+  padding: 2px 2px 8px;
+}
+.nt-page {
+  flex: none; width: 92px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 0; border: 0; background: transparent; color: var(--text);
+  scroll-snap-align: start;
+}
+.nt-page-img {
+  position: relative; width: 92px; height: 130px;
+  display: grid; place-items: center; overflow: hidden;
+  border: var(--bw) solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+  transition: transform var(--dur-fast) var(--ease-snap), box-shadow var(--dur-fast);
+}
+.nt-page-img img { width: 100%; height: 100%; object-fit: contain; }
+.nt-page:active .nt-page-img { transform: translate(2px, 2px); box-shadow: none; }
+@media (hover: hover) { .nt-page:hover .nt-page-img { border-color: var(--muted); } }
+.nt-page-n { font-family: var(--font-mono); font-size: 13px; font-weight: 700; line-height: 1.2; }
+.nt-page-pdf { font-family: var(--font-mono); font-size: 11px; line-height: 1.2; color: var(--faint); }
+/* A covered page carries ink, not a state colour: "done in an earlier class" is
+   history, not a right answer. */
+.nt-page-done {
+  position: absolute; top: 4px; left: 4px;
+  display: inline-flex; align-items: center; height: 18px; padding: 0 5px;
+  border-radius: var(--r-sm); background: var(--text); color: var(--bg);
+  font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase;
+}
+.nt-page-gone { padding: 8px; text-align: center; font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.nt-pages-empty {
+  flex: 1; min-height: 56px; padding: 10px 12px;
+  display: grid; place-items: center; text-align: center;
+  border: var(--bw-strong) dashed var(--line-strong); border-radius: var(--r-md);
+  font-size: 14px; color: var(--faint);
+}
+.nt-page-preview { display: grid; place-items: center; border-radius: var(--r-sm); background: var(--sunk); }
+.nt-page-full { width: 100%; height: auto; max-height: 72dvh; object-fit: contain; }
+
+.nt-offset-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.nt-offset-text { font-size: 15px; color: var(--text); }
+.nt-stepper { display: inline-flex; }
+.nt-stepper .btn { box-shadow: none; }
+.nt-stepper .btn:first-child { border-radius: var(--r-md) 0 0 var(--r-md); }
+.nt-stepper .btn:last-child { border-radius: 0 var(--r-md) var(--r-md) 0; }
+.nt-offset-input {
+  width: 72px; min-width: 0;
+  border-left: 0; border-right: 0; border-radius: 0;
+  text-align: center; font-family: var(--font-mono); font-size: 18px;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.nt-offset-input::-webkit-inner-spin-button,
+.nt-offset-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+/* The minus the pixel set lacks, drawn at the plus icon's stroke: 16 × 4 px. */
+.nt-minus { display: block; width: 16px; height: 4px; background: currentColor; }
+.nt-instructions { min-height: 88px; }
 
 /* ---------- footer ---------- */
 .nt-foot { display: flex; justify-content: flex-end; padding-top: 4px; border-top: var(--bw) solid var(--line); }
+
+/* celebrate() needs a positioned box: this one covers the screen and takes no taps. */
+.nt-confetti-layer { position: fixed; inset: 0; z-index: 250; pointer-events: none; }

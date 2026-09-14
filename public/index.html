@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="/css/challenge.css" />
 <link rel="stylesheet" href="/css/notes.css" />
 <link rel="stylesheet" href="/css/settings.css" />
+<link rel="stylesheet" href="/css/welcome.css" />
 <script src="/js/pixel.js"></script>
 </head>
 <body class="pl-boot">
@@ -42,9 +43,12 @@
     </aside>
     <div class="main">
       <header class="topbar">
-        <a class="topbar-brand" href="#/today"><span class="px" data-art="bird-idle" data-cell="2" aria-hidden="true"></span>MemoLang</a>
+        <a class="topbar-brand" href="#/today" aria-label="Today"><span class="px" data-art="bird-idle" data-cell="2" aria-hidden="true"></span><span class="topbar-wordmark">MemoLang</span></a>
         <div class="topbar-title" id="topbarTitle"></div>
         <div class="topbar-stats" id="topbarStats"></div>
+        <!-- The phone's only way into Settings. The bottom bar has no room for a
+             seventh tab, and on a wide screen the rail carries Settings instead. -->
+        <a class="btn btn--icon btn--quiet topbar-settings" href="#/settings" data-nav="settings" aria-label="Settings" title="Settings"><span class="px" data-art="settings" data-cell="2" aria-hidden="true"></span></a>
       </header>
       <main class="view" id="view" tabindex="-1"></main>
     </div>
@@ -53,6 +57,7 @@
       <a class="tab" href="#/lessons" data-nav="lessons"><span class="px" data-art="lessons" data-cell="2"></span>Lessons</a>
       <a class="tab" href="#/review" data-nav="review"><span class="px" data-art="review" data-cell="2"></span>Review</a>
       <a class="tab" href="#/words" data-nav="words"><span class="px" data-art="words" data-cell="2"></span>Words</a>
+      <a class="tab" href="#/challenge" data-nav="challenge"><span class="px" data-art="trophy" data-cell="2"></span>Challenge</a>
       <a class="tab" href="#/notes" data-nav="notes"><span class="px" data-art="notes" data-cell="2"></span>Notes</a>
     </nav>
   </div>

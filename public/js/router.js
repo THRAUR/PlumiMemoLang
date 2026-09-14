@@ -4,6 +4,7 @@ import { emit } from './state.js';
 
 const ROUTES = [
   ['/today', () => import('./views/today.js')],
+  ['/welcome', () => import('./views/welcome.js')],
   ['/lessons/:id', () => import('./views/lessons.js')],
   ['/lessons', () => import('./views/lessons.js')],
   ['/review', () => import('./views/review.js')],

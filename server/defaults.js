@@ -1,5 +1,8 @@
 /* Default documents. Settings are deep-merged over these on read, so adding a
    field here is enough for an old data/settings.json to pick it up. */
+import { DEFAULT_PRIORITY } from './ai/models.js';
+import { BUILTIN_TEMPLATES, DEFAULT_GOALS } from '../shared/goals.js';
+
 export const DEFAULT_SETTINGS = {
   learnerName: '',
   nativeLanguage: 'en',
@@ -9,16 +12,19 @@ export const DEFAULT_SETTINGS = {
   newWordsPerDay: 5,
   theme: 'system',
   tts: { voice: '', rate: 0.9 },
-  cardTemplates: [
-    { id: 'recognition', name: 'Recognition', front: ['hanzi'], back: ['reading', 'meaning', 'example'], builtin: true, enabled: true },
-    { id: 'production', name: 'Production', front: ['meaning'], back: ['hanzi', 'reading', 'example'], builtin: true, enabled: true },
-    { id: 'sound', name: 'Sound', front: ['reading'], back: ['hanzi', 'meaning', 'example'], builtin: true, enabled: false },
-    { id: 'listening', name: 'Listening', front: ['audio'], back: ['hanzi', 'reading', 'meaning'], builtin: true, enabled: false },
-    { id: 'cloze', name: 'Fill the blank', front: ['cloze'], back: ['hanzi', 'reading', 'example'], builtin: true, enabled: false },
-  ],
+  // Definitions come from shared/goals.js; readSettings() keeps a stored list in
+  // step with them. Only the two templates enabled before goals existed start on;
+  // the welcome questions switch on the ones that fit the learner.
+  cardTemplates: BUILTIN_TEMPLATES.map((t) => ({ ...t, enabled: t.id === 'recognition' || t.id === 'production' })),
+  // Answered in #/welcome; see docs/ARCHITECTURE.md §8.1.
+  goals: { ...DEFAULT_GOALS },
+  // '' follows the focus (small characters for a speaking learner, full otherwise).
+  display: { hanzi: '' },
   ai: {
     apiKey: '',
-    models: { default: 'anthropic/claude-sonnet-4.5', extract: '', suggest: '', enrich: '', explain: '', reading: '' },
+    // The order models are tried in, top first. The allow-list and the reasons
+    // for this order live in server/ai/models.js; Settings reorders it.
+    priority: [...DEFAULT_PRIORITY],
     monthlyBudgetUsd: 5,
   },
 };

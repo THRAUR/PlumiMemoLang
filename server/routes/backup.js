@@ -2,7 +2,9 @@
    the dictionary, the lessons, the notes, the schedule and the streak. The API
    key is never in it — a backup lands in a cloud drive.
    Note photos are NOT in it either (they would multiply the file size); their
-   metadata is, so a restored note still says which photos it had. */
+   metadata is, so a restored note still says which photos it had. Documents
+   (data/materials) are left out entirely: a scanned textbook can be hundreds of
+   megabytes, and a material record without its PDF would only be a broken row. */
 import { Router } from 'express';
 import { coll, doc } from '../store.js';
 import { config } from '../config.js';

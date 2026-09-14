@@ -11,17 +11,25 @@
    (the server still schedules it; we only decide when it reappears on screen).
 
    Every request can 404 while the routes are being written: the landing must
-   still paint, so failures become a toast plus a retry, never a console error. */
+   still paint, so failures become a toast plus a retry, never a console error.
+
+   Cards follow the learner's display rules (§8.3): in "small" and "hidden" mode
+   the reading IS the word and the characters are a footnote or gone, because a
+   learner who wants to speak keeps characters only to check a meaning. The `say`
+   card (§8.1) asks for the word out loud: record it, optionally let recognition
+   listen, then compare with the model voice on the back. */
 
 import { api } from '../api.js';
 import { settings, stats, setStats, refreshStats } from '../state.js';
 import { navigate } from '../router.js';
 import { createBird } from '../bird.js';
-import { hanziEl } from '../hanzi.js';
+import { hanziEl, wordHero, exampleEl } from '../hanzi.js';
+import { recordControl, recognition, listenOnce, hanziMatch } from '../speech.js';
 import { hanziChars } from '/shared/zhuyin.js';
+import { BUILTIN_TEMPLATES } from '/shared/goals.js';
 import {
   h, toast, confirmWindow, emptyState, busy, celebrate, tts, speakButton, pixelIcon,
-  fmt, readingFor, readingEl, openSession, markdownish, meter, bandChip, setTitle,
+  fmt, readingFor, readingEl, openSession, markdownish, meter, bandChip, setTitle, profile, hanziMode,
 } from '../ui.js';
 
 /* The four grades, in screen order. `key` indexes card.preview from the API
@@ -33,17 +41,21 @@ const GRADES = [
   { g: 3, key: 'easy', label: 'Easy', cls: 'btn--ok', kbd: '4' },
 ];
 
-/* A local copy of the built-in templates (contract §3.4). Only a fallback:
-   the queue response and settings both carry the real list, but either can be
-   missing while the server is still coming up. */
-const BUILTIN_TEMPLATES = [
-  { id: 'recognition', name: 'Recognition', front: ['hanzi'], back: ['reading', 'meaning', 'example'], enabled: true },
-  { id: 'production', name: 'Production', front: ['meaning'], back: ['hanzi', 'reading', 'example'], enabled: true },
-  { id: 'sound', name: 'Sound', front: ['reading'], back: ['hanzi', 'meaning', 'example'], enabled: false },
-  { id: 'listening', name: 'Listening', front: ['audio'], back: ['hanzi', 'reading', 'meaning'], enabled: false },
-  { id: 'cloze', name: 'Fill the blank', front: ['cloze'], back: ['hanzi', 'reading', 'example'], enabled: false },
-];
-const RECOGNITION = BUILTIN_TEMPLATES[0];
+/* The built-in templates come from shared/goals.js, the same list the server
+   normalises settings with. Only a fallback: the queue response and settings
+   both carry the real list, but either can be missing while the server is
+   still coming up. */
+const RECOGNITION = BUILTIN_TEMPLATES.find((t) => t.id === 'recognition');
+const builtin = (id) => BUILTIN_TEMPLATES.find((t) => t.id === id) || null;
+
+/* When none of the chosen fronts fits a word (no example for a cloze, no voice
+   for audio), borrow the builtin that best fits what the learner is learning
+   for: a speaking learner must not be handed a character drill instead. */
+const FALLBACK = {
+  speaking: ['say', 'sound', 'production', 'recognition'],
+  characters: ['recognition', 'production', 'sound'],
+  balanced: ['recognition', 'sound', 'say'],
+};
 
 /* Plumi's between-cards encouragement. Chinese first: the learner came here
    to read Chinese. */
@@ -61,6 +73,18 @@ function later(fn, ms) {
 }
 function clearTimers() { for (const t of timers) clearTimeout(t); timers.clear(); }
 
+/* iOS Safari ignores speechSynthesis.speak() until the page has spoken once from
+   a tap. A session's first sounds come from timers (the listening card), so a
+   silent utterance inside the tap that opens the session unlocks the rest. */
+function unlockSpeech() {
+  if (!tts.available) return;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    window.speechSynthesis.speak(u);
+  } catch { /* nothing to unlock */ }
+}
+
 /* ---------- queue fetching ---------- */
 function queueUrl({ limit = 20, lessonId = '', newLimit = null, includeNew = null } = {}) {
   const p = new URLSearchParams();
@@ -76,7 +100,35 @@ function templateList(data) {
   if (fromQueue.length) return fromQueue;
   const fromSettings = (Array.isArray(settings?.cardTemplates) ? settings.cardTemplates : []).filter((t) => t?.id && t.enabled);
   if (fromSettings.length) return fromSettings;
-  return BUILTIN_TEMPLATES.filter((t) => t.enabled);
+  const want = profile().templates;
+  return BUILTIN_TEMPLATES.filter((t) => want.includes(t.id));
+}
+
+/* ---------- display rules ----------
+   A template that DRILLS characters (characters or a blanked sentence on the
+   front, or characters as the first thing on the back) keeps them big in any
+   mode: the learner switched it on to practise exactly that. Every other
+   template shows the word by hanziMode(). */
+function drillsCharacters(tpl) {
+  const front = tpl.front || [];
+  return front.includes('hanzi') || front.includes('cloze') || (tpl.back || [])[0] === 'hanzi';
+}
+
+/* The back's fields in drawing order. The template says WHAT is on the back;
+   the display rules say which of it is the hero: the ruby hanzi first in full
+   mode, the reading first and the characters last (small) otherwise. */
+function backOrder(tpl, mode) {
+  const back = [...(tpl.back || [])];
+  if (drillsCharacters(tpl)) return back;
+  const move = (name, toEnd) => {
+    const i = back.indexOf(name);
+    if (i < 0) return;
+    back.splice(i, 1);
+    if (toEnd) back.push(name); else back.unshift(name);
+  };
+  if (mode === 'full') move('hanzi', false);
+  else { move('reading', false); move('hanzi', true); }
+  return back;
 }
 
 /* ---------- field renderers ----------
@@ -108,43 +160,129 @@ function blankNodes(text, hanzi) {
   return out;
 }
 
-function exampleEl(ex, { blankFor = null, speak = false } = {}) {
-  const zh = h('div', { class: 'zh grow', lang: 'zh-Hant' }, ...(blankFor ? blankNodes(ex.zh, blankFor) : [ex.zh || '']));
-  const box = h('div', { class: 'example rv-example' }, h('div', { class: 'row' }, zh, speak ? speakButton(ex.zh, { label: 'Play the sentence' }) : null));
-  // On a blanked sentence the reading would hand over the answer.
-  if (!blankFor) { const r = readingEl(ex); if (r) box.append(r); }
+/* An example on the FRONT of a custom template: the word blanked out. On a
+   blanked sentence the reading would hand over the answer, so none is shown. */
+function blankedExample(ex, hanzi) {
+  const zh = h('div', { class: 'zh grow', lang: 'zh-Hant' }, ...blankNodes(ex.zh, hanzi));
+  const box = h('div', { class: 'example rv-example rv-example--blank' }, h('div', { class: 'row' }, zh));
   if (ex.translation) box.append(h('div', { class: 'tr' }, ex.translation));
   return box;
 }
 
-function renderField(name, word, { side, tpl }) {
+/* speech.js gives the record control no stop(); its own button stops a take and
+   keeps it, so press that whenever something else needs the microphone or the
+   speaker (recognition, the model voice). */
+function stopRecording(rec) {
+  const btn = rec?.el?.querySelector?.('.rec-btn.is-recording');
+  if (btn) btn.click();
+}
+
+/* "Check me": recognition listens once and says whether it heard the word.
+   It only ADVISES. It returns characters, which is not the same thing as a
+   Taiwanese ear, so the learner still grades the card themselves. */
+function checkMe(word, card) {
+  if (!recognition.supported || !window.isSecureContext || !hanziChars(word.hanzi).length) return null;
+  const label = h('span', null, 'Check me');
+  const btn = h('button', { class: 'btn rv-check', type: 'button' }, pixelIcon('check', 2), label);
+  const status = h('p', { class: 'rv-heard', role: 'status', 'aria-live': 'polite', hidden: true });
+  const say = (cls, ...kids) => { status.className = `rv-heard${cls ? ' ' + cls : ''}`; status.replaceChildren(...kids); status.hidden = false; };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (card.listening) return;
+    stopRecording(card.rec);                 // both want the microphone; the take is kept
+    card.listening = true;
+    btn.disabled = true;
+    label.textContent = 'Listening…';
+    say('', 'Say it now.');
+    // listenOnce() starts the recogniser synchronously, inside this tap: iOS
+    // Safari only opens the microphone from a user gesture.
+    listenOnce({ lang: 'zh-TW', timeoutMs: 7000 })
+      .then((res) => {
+        if (!card.live) return;
+        const heard = [res?.text, ...(res?.alternatives || []).map((a) => a?.text)].filter(Boolean);
+        const best = heard.reduce((m, t) => Math.max(m, hanziMatch(t, word.hanzi)), 0);
+        if (best >= 0.8) say('is-ok', pixelIcon('check', 2), 'Plumi heard it right');
+        else if (heard.length) say('', 'Plumi heard ', h('span', { class: 'rv-heard-zh', lang: 'zh-Hant' }, heard[0]), '. Listen, then try again.');
+        else say('', 'Plumi did not hear anything.');
+      })
+      .catch((err) => { if (card.live) say('', err?.message || 'Plumi could not listen.'); })
+      .finally(() => {
+        card.listening = false;
+        if (!card.live) return;
+        btn.disabled = false;
+        label.textContent = 'Check again';
+      });
+  });
+  return { btn, status };
+}
+
+/* The `record` field: the one record control from speech.js plus "Check me".
+   With neither (no microphone API, no recognition) the card still works: the
+   learner says it out loud and grades themselves. */
+function sayTools(word, card) {
+  const rec = recordControl({ label: 'Record yourself', maxMs: 8000 });
+  card.rec = rec;
+  card.cleanups.push(() => rec.destroy());
+  const check = checkMe(word, card);
+  if (rec.el.hidden && !check) return null;
+  const box = h('div', { class: 'rv-say-tools' }, rec.el);
+  if (check) box.append(check.btn, check.status);
+  return box;
+}
+
+function renderField(name, word, { side, tpl, mode, drill, card }) {
   switch (name) {
     case 'hanzi': {
-      // Recognition asks for the reading, so the front must not print it.
-      const hide = side === 'front' && (tpl.back || []).includes('reading');
-      const el = hanziEl(word, { reading: hide ? 'none' : 'auto', size: 'xl' });
-      if (hide) el.dataset.rvHidden = '1';
-      return el;
+      if (side === 'front') {
+        // Recognition asks for the reading, so the front must not print it.
+        const hide = (tpl.back || []).includes('reading');
+        const el = hanziEl(word, { reading: hide ? 'none' : 'auto', size: 'xl' });
+        if (hide) el.dataset.rvHidden = '1';
+        return el;
+      }
+      if (drill || mode === 'full') return hanziEl(word, { size: 'xl' });
+      // "small": the characters are the reading's footnote. "hidden": gone.
+      return mode === 'small' && word.hanzi ? h('div', { class: 'rv-hanzi-note', lang: 'zh-Hant' }, word.hanzi) : null;
     }
-    case 'reading':
-      return readingEl(word, { size: 'lg', both: side === 'back' });
+    case 'reading': {
+      if (!readingFor(word).primary) return null;
+      // On a front the reading is the whole question, so it is the hero; the
+      // characters stay off it (they would answer a character reader's question).
+      if (side === 'front') return wordHero(word, { size: 'xl', mode: 'hidden' });
+      if (drill || mode === 'full') return readingEl(word, { size: 'lg', both: true });
+      return wordHero(word, { size: 'xl', mode: 'hidden' });
+    }
     case 'meaning': {
       if (!word.meaning && !word.meaningNative) return null;
-      const box = h('div', { class: 'rv-meaning' }, h('p', { class: 'meaning' }, word.meaning || word.meaningNative));
+      const box = h('div', { class: `rv-meaning${side === 'front' ? ' rv-meaning--front' : ''}` }, h('p', { class: 'meaning' }, word.meaning || word.meaningNative));
       if (side === 'back' && word.meaning && word.meaningNative) box.append(h('p', { class: 'small muted' }, word.meaningNative));
       return box;
     }
     case 'example': {
       const ex = pickExample(word);
       if (!ex) return null;
-      return exampleEl(ex, { blankFor: side === 'front' ? word.hanzi : null, speak: side === 'back' });
+      if (side === 'front') return blankedExample(ex, word.hanzi);
+      const el = exampleEl(ex);
+      if (!el) return null;
+      return h('div', { class: 'rv-example' }, el, tts.available ? speakButton(ex.zh, { label: 'Play the sentence' }) : null);
     }
     case 'audio': {
       if (!tts.available) return null;
-      return h('div', { class: 'rv-audio' },
-        speakButton(word.hanzi, { size: 'lg', label: 'Play the word' }),
-        h('span', { class: 'pl-eyebrow no-rule' }, 'Listen'));
+      if (side === 'front') {
+        return h('div', { class: 'rv-audio' },
+          speakButton(word.hanzi, { size: 'lg', label: 'Play the word' }),
+          h('span', { class: 'pl-eyebrow no-rule' }, 'Listen'));
+      }
+      // On the back the model voice is one labelled button; the learner's own
+      // take joins it on reveal, so the two play side by side.
+      const row = h('div', { class: 'rv-listen-row' },
+        h('button', { class: 'btn rv-listen', type: 'button', onClick: (e) => { e.stopPropagation(); tts.speak(word.hanzi); } },
+          pixelIcon('speaker', 2), 'Listen'));
+      card.listenRow = row;
+      return row;
     }
+    case 'record':
+      return side === 'front' ? sayTools(word, card) : null;
     case 'cloze': {
       const ex = clozeExample(word) || pickExample(word);
       if (!ex) return null;
@@ -165,7 +303,8 @@ function renderField(name, word, { side, tpl }) {
 }
 
 /* Can this word carry this template's FRONT? A cloze needs an example holding
-   the word; audio needs a speech synthesiser. */
+   the word; audio needs a speech synthesiser; a say card needs a reading to
+   reveal, or there is nothing to compare what was said with. */
 function frontWorks(tpl, word) {
   for (const f of tpl.front || []) {
     if (f === 'hanzi' && !word.hanzi) return false;
@@ -176,6 +315,7 @@ function frontWorks(tpl, word) {
     if (f === 'cloze' && !clozeExample(word)) return false;
     if (f === 'notes' && !word.notes) return false;
     if (f === 'tags' && !(word.tags || []).length) return false;
+    if (f === 'record' && !readingFor(word).primary) return false;
   }
   return true;
 }
@@ -281,6 +421,7 @@ function nothingDue(ctx, counts) {
       class: 'btn btn--primary', type: 'button',
       onClick: async (e) => {
         const b = e.currentTarget; busy(b);
+        unlockSpeech();
         try {
           const data = ctx.demo ? demoQueue('1') : await api.get(queueUrl({ limit: Math.max(20, per), lessonId: ctx.lessonId, newLimit: per, includeNew: true }));
           if (ctx.my !== token) return;
@@ -324,7 +465,7 @@ function startBlock(ctx, cards, counts) {
 
   out.push(h('button', {
     class: 'btn btn--primary btn--lg btn--block', type: 'button',
-    onClick: () => startSession(ctx, { cards, counts, templates: ctx.templates }),
+    onClick: () => { unlockSpeech(); startSession(ctx, { cards, counts, templates: ctx.templates }); },
   }, pixelIcon('review', 2), `Start review · ${cards.length}`));
 
   if (ctx.lessonId) {
@@ -332,6 +473,7 @@ function startBlock(ctx, cards, counts) {
       class: 'btn btn--block', type: 'button',
       onClick: async (e) => {
         const b = e.currentTarget; busy(b);
+        unlockSpeech();
         try {
           const data = ctx.demo ? demoQueue('1') : await api.get(queueUrl({ limit: 200, lessonId: ctx.lessonId, newLimit: 200 }));
           if (ctx.my !== token) return;
@@ -357,6 +499,11 @@ function startSession(ctx, data) {
   let idx = 0, graded = 0, correct = 0, xpEarned = 0, rotate = 0;
   let revealed = false, ended = false, cardAt = 0;
   let front = null, back = null, hiddenHanzi = null;
+  /* What belongs to the card on screen: its record control (released when the
+     card goes), where the back's listen row is, and whether recognition is still
+     listening. `live` turns false the moment the card leaves, so a late
+     recognition result never paints onto the next card. */
+  let card = null;
   const pending = [];
 
   const bird = createBird({ size: 3, mood: 'think' });
@@ -368,6 +515,7 @@ function startSession(ctx, data) {
       live = null;
       document.removeEventListener('keydown', onKey);
       clearTimers();
+      dropCard();
       if (!ctx.leaving && ctx.my === token && ctx.root.isConnected) loadLanding(ctx);
     },
   });
@@ -394,17 +542,35 @@ function startSession(ctx, data) {
   }
 
   function chooseTemplate(word) {
-    // Rotate through the chosen templates; a front this word cannot carry
-    // (no example for a cloze, no voice for audio) falls back to recognition.
-    const tpl = use[rotate++ % use.length] || RECOGNITION;
-    return frontWorks(tpl, word) ? tpl : RECOGNITION;
+    // Rotate through the chosen templates. A front this word cannot carry (no
+    // example for a cloze, no voice for audio) passes its turn to the next chosen
+    // one, and only when none fits does a builtin step in (FALLBACK).
+    for (let k = 0; k < use.length; k += 1) {
+      const tpl = use[(rotate + k) % use.length];
+      if (tpl && frontWorks(tpl, word)) { rotate += k + 1; return tpl; }
+    }
+    rotate += 1;
+    for (const id of FALLBACK[profile().focus] || FALLBACK.balanced) {
+      const tpl = builtin(id);
+      if (tpl && frontWorks(tpl, word)) return tpl;
+    }
+    return RECOGNITION;
+  }
+
+  function dropCard() {
+    if (!card) return;
+    card.live = false;
+    for (const fn of card.cleanups) { try { fn(); } catch { /* already released */ } }
+    card = null;
   }
 
   function showCard() {
     if (idx >= queue.length) { end(true); return; }
+    dropCard();
     const item = queue[idx];
     const word = item.word;
     const tpl = item.tpl = chooseTemplate(word);
+    card = { mode: hanziMode(), drill: drillsCharacters(tpl), cleanups: [], rec: null, listenRow: null, listening: false, live: true };
     revealed = false;
     hiddenHanzi = null;
     cardAt = performance.now();
@@ -412,13 +578,19 @@ function startSession(ctx, data) {
     session.setProgress(graded, Math.max(1, queue.length));
 
     front = h('div', { class: 'rv-fields rv-front' });
-    for (const f of (tpl.front || ['hanzi'])) {
-      const node = renderField(f, word, { side: 'front', tpl });
+    const fronts = tpl.front || ['hanzi'];
+    // The say card's instruction: without it, a lone English word reads like a
+    // flashcard to translate in one's head, not a word to say out loud.
+    if (fronts.includes('record')) front.append(h('p', { class: 'pl-eyebrow no-rule rv-instruction' }, 'Say it out loud'));
+    let drawn = 0;
+    for (const f of fronts) {
+      const node = renderField(f, word, { side: 'front', tpl, mode: card.mode, drill: card.drill, card });
       if (!node) continue;
       if (node.dataset?.rvHidden === '1') hiddenHanzi = node;
       front.append(node);
+      drawn += 1;
     }
-    if (!front.childNodes.length) front.append(hanziEl(word, { size: 'xl' }));
+    if (!drawn) front.append(hanziEl(word, { size: 'xl' }));
     back = h('div', { class: 'rv-fields rv-back', hidden: true });
 
     // .rv-stage centres the card in the body with auto margins, which (unlike
@@ -433,24 +605,29 @@ function startSession(ctx, data) {
     session.body.scrollTop = 0;
 
     // The listening card plays itself once, the way a teacher would say it.
-    if ((tpl.front || []).includes('audio')) later(() => { if (!ended) tts.speak(word.hanzi); }, 260);
+    if (fronts.includes('audio')) later(() => { if (!ended) tts.speak(word.hanzi); }, 260);
 
     session.footer.replaceChildren(birdSlot, h('button', {
-      class: 'btn btn--primary btn--lg', type: 'button', onClick: reveal,
+      class: 'btn btn--primary btn--lg rv-show', type: 'button', onClick: reveal,
     }, 'Show answer', h('span', { class: 'kbd' }, 'space')));
   }
 
   function reveal() {
-    if (revealed || ended) return;
+    if (revealed || ended || !card) return;
     revealed = true;
     const item = queue[idx];
     const { word, tpl } = item;
+    // A take still recording would capture the model voice over the learner's.
+    stopRecording(card.rec);
     // The hanzi flips from bare to ruby: the reading WAS the question.
     if (hiddenHanzi) hiddenHanzi.replaceWith(hanziEl(word, { size: 'xl' }));
-    for (const f of (tpl.back || [])) {
-      const node = renderField(f, word, { side: 'back', tpl });
+    for (const f of backOrder(tpl, card.mode)) {
+      const node = renderField(f, word, { side: 'back', tpl, mode: card.mode, drill: card.drill, card });
       if (node) back.append(node);
     }
+    // The same control, and so the same take, moves from the front to sit beside
+    // the model voice: "Play mine" and "Listen" belong next to each other.
+    if (card.rec && card.listenRow && !card.rec.el.hidden) card.listenRow.append(card.rec.el);
     const chip = bandChip(word.band);
     if (chip || Number.isFinite(word.score)) {
       const metaRow = h('div', { class: 'row rv-meta' }, chip);
@@ -461,6 +638,22 @@ function startSession(ctx, data) {
     back.hidden = false;
     bird.setMood('idle');
     gradeFooter();
+    // Said, then heard from the model: that comparison is the say card. Spoken
+    // inside the tap (iOS wants the gesture), and not while recognition is still
+    // listening, or it would hear Plumi instead of the learner.
+    if ((tpl.front || []).includes('record') && !card.listening) tts.speak(word.hanzi);
+    later(() => bringIntoView(back), 40);
+  }
+
+  /* On a short phone the answer can land below the fold. Scroll just enough to
+     show it, never past its top, so the front stays in reach above. */
+  function bringIntoView(el) {
+    if (!el?.isConnected) return;
+    const box = session.body.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const overflow = r.bottom - box.bottom + 12;
+    if (overflow <= 0) return;
+    session.body.scrollBy({ top: Math.min(overflow, r.top - box.top - 8), behavior: 'smooth' });
   }
 
   function gradeFooter() {
@@ -471,7 +664,7 @@ function startSession(ctx, data) {
       actions.append(h('button', {
         class: `btn ${gr.cls}`, type: 'button', title: `${gr.label} — press ${gr.kbd}`, 'aria-keyshortcuts': gr.kbd,
         onClick: () => grade(gr),
-      }, gr.label, label ? h('span', { class: 'kbd' }, label) : null));
+      }, h('span', { class: 'rv-grade' }, gr.label), label ? h('span', { class: 'kbd' }, label) : null));
     }
     session.footer.replaceChildren(birdSlot, actions);
   }
@@ -502,6 +695,7 @@ function startSession(ctx, data) {
       xpEarned += 2 + (gr.g >= 2 ? 1 : 0);
     }
 
+    tts.stop();
     idx += 1;
     showCard();
   }
@@ -511,6 +705,7 @@ function startSession(ctx, data) {
     ended = true;
     document.removeEventListener('keydown', onKey);
     tts.stop();
+    dropCard();
     if (!complete) { session.close(); return; }
 
     session.setBusy(true);
@@ -563,6 +758,7 @@ function startSession(ctx, data) {
         class: 'btn btn--primary btn--lg', type: 'button',
         onClick: async (e) => {
           const b = e.currentTarget; busy(b);
+          unlockSpeech();
           try {
             const data = ctx.demo ? demoQueue('1') : await api.get(queueUrl({ limit: 20, lessonId: ctx.lessonId }));
             if (!(data?.cards || []).length) { toast('Nothing due right now.', ''); session.close(); return; }
@@ -586,9 +782,11 @@ function startSession(ctx, data) {
    exercised (and screenshotted) while the review routes do not exist yet.
    `?demo=empty` returns an empty queue with new words waiting and `?demo=zero`
    an empty one with nothing at all, so both empty states are reachable too.
-   Harmless: it only runs when the hash carries demo=, and it never POSTs. */
+   Harmless: it only runs when the hash carries demo=, and it never POSTs.
+   The demo uses the templates recommended for the learner's goals. */
 function demoQueue(mode = '1') {
-  const templates = BUILTIN_TEMPLATES.filter((t) => ['recognition', 'production', 'cloze'].includes(t.id));
+  const want = profile().templates;
+  const templates = BUILTIN_TEMPLATES.filter((t) => want.includes(t.id));
   if (mode === 'empty') return { cards: [], counts: { due: 0, learning: 0, new: 2, total: 0 }, templates };
   if (mode === 'zero') return { cards: [], counts: { due: 0, learning: 0, new: 0, total: 0 }, templates };
   const preview = { again: { ms: 6e5, label: '10m' }, hard: { ms: 864e5, label: '1d' }, good: { ms: 2592e5, label: '3d' }, easy: { ms: 6048e5, label: '7d' } };

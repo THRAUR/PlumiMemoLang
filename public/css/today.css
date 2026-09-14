@@ -7,7 +7,7 @@
 /* ============================================================
    1. hero — Plumi, the greeting, the ring, the streak
    ============================================================ */
-.td-hero { display: flex; flex-direction: column; gap: 16px; }
+.td-hero { display: flex; flex-direction: column; gap: 14px; }
 
 .td-coach { align-items: flex-end; }
 /* The bird is a button; strip the chrome and keep the sprite's 44px+ target. */
@@ -15,17 +15,35 @@
 .td-bubble { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-height: 64px; }
 .td-bubble .td-hi { display: block; font-size: 17px; font-weight: 700; line-height: 1.25; }
 .td-bubble .td-line { display: block; font-size: 14px; line-height: 1.35; }
+/* A Chinese phrase for a speaking learner: the reading carries it, 字 trails small. */
+.td-say { font-family: var(--font-mono); }
+.td-say.zh { font-family: var(--font-zh); }
+.td-say-hz { font-size: .85em; font-weight: 400; color: var(--faint); }
 .td-pop { animation: pop var(--dur-base) var(--ease-snap) both; }   /* pop: plume.css */
 
-.td-numbers { gap: 18px; }
-.td-ring { flex: none; }
-.td-streak-box { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.td-streak { height: 46px; padding: 0 14px 0 10px; gap: 8px; font-size: 24px; }
+/* Two equal tiles under Plumi: the goal and the streak. The ring's disc only
+   holds the number, so the goal ("of 30 XP today") sits under it in the tile;
+   at 375px nothing crosses a stroke or leaves its box. */
+.td-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.td-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0;
+  padding: 12px 10px 13px; text-align: center;
+  background: var(--surface); border: var(--bw) solid var(--line-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+}
+.td-tile .ring { width: 72px; height: 72px; }
+.td-tile .ring-label { inset: 12px; font-size: 20px; }
+.td-tile .ring-label.is-long { font-size: 15px; }
+.td-flame { height: 72px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text); }
 /* app.css paints .streak .px terracotta because in the top bar the streak IS
    the region's one pop. Here the goal ring is, so the big flame stays ink. */
-.td-hero .td-streak .px { color: var(--text); }
-.td-hero .td-streak.is-cold .px { color: var(--faint); }
-.td-streak-meta { white-space: nowrap; }
+.td-flame .px { color: var(--text); }
+.td-streak-tile.is-cold .td-flame .px { color: var(--faint); }
+.td-flame-n { font-family: var(--font-display); font-size: 34px; font-weight: 700; line-height: 1; }
+.td-tile-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; max-width: 100%; }
+.td-tile-main { font-size: 15px; font-weight: 700; line-height: 1.25; color: var(--text); }
+.td-tile-main.is-done { color: var(--green); }       /* reached: a state, not decoration */
+.td-tile-sub { font-size: 13px; line-height: 1.3; color: var(--faint); }
 
 /* ============================================================
    2. the "Today" window — action rows
@@ -54,7 +72,8 @@
   box-shadow: 2px 2px 0 color-mix(in srgb, var(--accent), #000 35%);
 }
 .td-act.is-off { opacity: .55; cursor: not-allowed; }
-.td-act.is-off:hover, .td-act.is-off:active { background: transparent; }
+.td-act.is-off:active { background: transparent; }
+@media (hover: hover) { .td-act.is-off:hover { background: transparent; } }
 .td-arrow { flex: none; display: grid; place-items: center; color: var(--faint); }
 
 /* ============================================================
@@ -64,7 +83,7 @@
    stripes do not run through it; the buttons need the same. */
 .td-titleicon { display: grid; place-items: center; padding: 0 2px; color: var(--muted); }
 .td-refresh { width: 44px; height: 30px; min-height: 30px; background: var(--surface-2); }
-.td-refresh:hover { background: var(--surface-3); }
+@media (hover: hover) { .td-refresh:hover { background: var(--surface-3); } }
 
 .td-state { display: flex; flex-direction: column; align-items: flex-start; }
 .td-note { width: 100%; }
@@ -72,20 +91,26 @@
 .td-generating { width: 100%; }
 .td-jobline { margin-top: 8px; }
 
-.td-suglist .td-sug { flex-wrap: wrap; row-gap: 10px; padding: 12px 14px; align-items: center; }
-.td-sug-hz { flex: none; }
-.td-sug-txt { flex: 1 1 55%; min-width: 0; }
+/* The word leads the row by the learner's display rules (wordLine: the reading
+   first for a speaking learner) with its play button beside it. Add and Skip
+   stack in a narrow column on the right, so a phone row stays short. */
+.td-suglist .td-sug { align-items: flex-start; gap: 12px; padding: 12px 12px 12px 14px; }
+.td-sug-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.td-sug-word { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.td-sug-word .word-line { min-width: 0; }
+.td-sug-word .btn--icon { flex: none; }
 .td-sug-mean { font-size: 16px; line-height: 1.3; }
 .td-sug-native { font-size: 14px; }
-.td-sug-why { line-height: 1.35; margin-top: 2px; }
-.td-sug-acts { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
-/* On a phone the word needs the width more than the buttons do: speak / Add /
-   dismiss drop to their own line, still right-aligned under the meaning. */
-@media (max-width: 559px) {
-  .td-sug-acts { flex: 1 0 100%; margin-left: 0; justify-content: flex-end; }
-}
+.td-sug-why { line-height: 1.35; }
+.td-sug-acts { flex: none; display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 84px; }
+/* 44px under the thumb: the kit's small buttons are 34px of ink. The play button
+   keeps its size inside the word line and grows its touch area instead. */
+.td-sug-acts .btn { min-height: 44px; }
+.td-sug-word .btn--icon { position: relative; }
+.td-sug-word .btn--icon::after { content: ""; position: absolute; inset: -5px; }
+@media (min-width: 560px) { .td-sug-acts { flex-direction: row; align-items: center; min-width: 0; } }
 .td-sug.is-added { background: var(--sunk); }
-.td-sug.is-added .td-sug-mean, .td-sug.is-added .hz { color: var(--muted); }
+.td-sug.is-added .td-sug-mean, .td-sug.is-added .word-line > * { color: var(--muted); }
 .td-sugg-foot { display: flex; justify-content: flex-end; padding: 12px 14px; border-top: var(--bw) solid var(--line); background: var(--surface-2); }
 
 /* "Learn new words" scrolls here; a one-shot outline says "this is the card". */
@@ -140,8 +165,8 @@
    wide: the hero opens out, the lower cards pair up
    ============================================================ */
 @media (min-width: 900px) {
-  .td-hero { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 32px; }
+  .td-hero { flex-direction: row; align-items: center; justify-content: space-between; gap: 32px; }
   .td-coach { flex: 1; min-width: 0; }
-  .td-numbers { flex: none; }
+  .td-numbers { flex: none; width: 360px; }
   .td-lower { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
 }

@@ -17,15 +17,22 @@
 .ls-section-zh { font-size: 15px; color: var(--muted); margin-top: 2px; }
 .ls-pattern { font-size: 16px; }
 
-.ls-dialogue { display: flex; flex-direction: column; gap: 12px; }
-.ls-dialogue-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.ls-dialogue-tr { flex: 1; min-width: 120px; }
+/* hanzi.js's exampleEl() has no speak option, so grammar examples get their
+   button in a row beside it (mirrors words.css's .wd-example-row). */
+.ls-example-row { align-items: flex-start; }
+.ls-example-row .btn--icon { margin-top: 2px; }
+
+.ls-dialogue { display: flex; flex-direction: column; gap: 14px; }
+.ls-dialogue-line { padding: 8px 10px; border-radius: var(--r-md); }
+/* A light alternating background per speaker turn — a neutral surface step,
+   not a colour, so it stays inside the one-accent rule. */
+.ls-dialogue-line.is-b { background: var(--surface-2); }
+.ls-dialogue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 2px; }
 
 /* ---------- vocabulary rows: two lines on a phone, same rhythm as Words ---------- */
 .ls-word-row { align-items: stretch; }
 .ls-word-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
 .ls-word-l1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.ls-word-l1 .reading { font-size: 13px; }
 .ls-word-l2 { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .ls-word-meaning { flex: 1; min-width: 0; }
 .ls-word-l2 .meter { width: 70px; flex: none; }
@@ -41,3 +48,30 @@
 .ls-study-body { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 28px 18px; }
 .ls-study-body .example { text-align: left; align-self: stretch; width: 100%; max-width: 420px; }
 .ls-study-done .win-body { text-align: center; }
+
+/* ---------- "Practice this dialogue" session (startDialogueSession) ---------- */
+/* Fills the session body and centres a short card instead of stranding it near
+   the top of a tall phone screen; a long card still scrolls (min-height, not height). */
+.ls-dg-stage { display: flex; flex-direction: column; justify-content: center; min-height: 100%; gap: 14px; }
+.ls-dg-rolerow { justify-content: center; gap: 10px; flex-wrap: wrap; margin: 0; }
+.ls-dg-rolelabel { flex: none; }
+.ls-dg-count { font-family: var(--font-label); font-size: 10px; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
+.ls-dg-body { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 28px 18px; }
+.ls-dg-prompt { gap: 14px; }
+/* The prompt is body copy (an English sentence), so it stays in Karla, just
+   bold and large — pixel display type is for headings and numbers, not this. */
+.ls-dg-translation { font-family: var(--font-body); font-weight: 700; font-size: clamp(20px, 6vw, 26px); line-height: 1.35; }
+/* This is the one place a line gets hero-sized: bigger than exampleEl's
+   compact default, so the practice moment reads like a flashcard front. */
+.ls-dg-body .example { border: 0; padding: 0; text-align: center; }
+.ls-dg-body .example .zh { font-size: clamp(26px, 7vw, 38px); }
+.ls-dg-body .example .reading { font-size: 16px; margin-top: 4px; }
+.ls-dg-body .example .tr { font-size: 15px; margin-top: 6px; }
+.ls-dg-body .example--speak .ex-reading { font-size: clamp(22px, 6vw, 30px); }
+.ls-dg-body .example--speak .ex-hanzi { font-size: 15px; margin-top: 6px; }
+.ls-dg-turn { margin-top: 18px; padding-top: 16px; border-top: var(--bw) dashed var(--line-strong); width: 100%; }
+.ls-dg-controls { justify-content: center; gap: 8px; }
+/* The "Slower" toggle's pressed state — the same accent-dim treatment as
+   every other active control in the kit (.seg button.is-active, .tab.is-active). */
+.ls-dg-controls .btn--ghost.is-active { background: var(--accent-dim); color: var(--accent-text); }
+.ls-dg-endbody { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 4px; text-align: center; }

@@ -33,7 +33,7 @@ body { position: relative; min-height: 100dvh; }
   font-family: var(--font-label); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
-.rail-link:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+@media (hover: hover) { .rail-link:hover { background: var(--surface-2); color: var(--text); text-decoration: none; } }
 .rail-link.is-active { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent-text); }
 .rail-link .px { color: currentColor; }
 .rail-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 4px; }
@@ -49,6 +49,12 @@ body { position: relative; min-height: 100dvh; }
 .topbar-brand { display: flex; align-items: center; gap: 8px; font-family: var(--font-label); font-size: 11px; color: var(--text); }
 .topbar-title { flex: 1; min-width: 0; font-family: var(--font-display); font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-stats { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.topbar-settings { flex: none; margin-right: -6px; color: var(--muted); }
+@media (hover: hover) { .topbar-settings:hover { color: var(--text); } }
+.topbar-settings.is-active { color: var(--accent-text); background: var(--accent-dim); }
+/* On a phone the wordmark gives way to the Settings button: the bird alone
+   still reads as "home", and the screen title needs the room more. */
+@media (max-width: 480px) { .topbar-wordmark { display: none; } }
 
 .view {
   flex: 1; width: 100%; max-width: var(--content-w); margin: 0 auto;
@@ -58,7 +64,7 @@ body { position: relative; min-height: 100dvh; }
 
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   background: var(--surface);
   border-top: var(--bw-strong) solid var(--line-strong);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -69,7 +75,7 @@ body { position: relative; min-height: 100dvh; }
   font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase;
   color: var(--faint); text-decoration: none;
 }
-.tab:hover { text-decoration: none; color: var(--muted); }
+@media (hover: hover) { .tab:hover { text-decoration: none; color: var(--muted); } }
 .tab.is-active { color: var(--accent-text); }
 .tab .px { color: currentColor; }
 body[data-session] .tabbar, body[data-session] .topbar { display: none; }
@@ -79,8 +85,16 @@ body[data-session] .tabbar, body[data-session] .topbar { display: none; }
   .rail { display: flex; }
   .tabbar { display: none; }
   .topbar-brand { display: none; }
+  /* Scoped to .topbar: the kit's .btn rule comes later in this file and would
+     otherwise put display: inline-flex back. The rail carries Settings here. */
+  .topbar .topbar-settings { display: none; }
   .view { padding: 32px 40px 64px; }
 }
+
+/* Until the router has painted the first screen, the chrome waits: a learner who has
+   not answered the welcome questions would otherwise see the tab bar flash before
+   #/welcome hides it. The router sets body[data-view] on its first render. */
+body:not([data-view]) .rail, body:not([data-view]) .topbar, body:not([data-view]) .tabbar { visibility: hidden; }
 
 /* ---------- streak, xp, goal ring ---------- */
 .streak, .xp {
@@ -101,14 +115,18 @@ body[data-session] .tabbar, body[data-session] .topbar { display: none; }
 }
 @keyframes xp-rise { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-36px); } }
 
-.ring { position: relative; width: 72px; height: 72px; flex: none; }
+.ring { position: relative; width: 80px; height: 80px; flex: none; }
 .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring circle { fill: none; stroke-width: 7; }
 .ring .ring-track { stroke: var(--sunk); }
 .ring .ring-fill { stroke: var(--accent); stroke-linecap: butt; transition: stroke-dashoffset var(--dur-slow) var(--ease-out); }
 .ring.is-done .ring-fill { stroke: var(--green); }
-.ring-label { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-display); font-size: 15px; font-weight: 700; line-height: 1; text-align: center; }
-.ring-label small { display: block; font-family: var(--font-label); font-size: 7px; letter-spacing: .06em; color: var(--faint); margin-top: 2px; }
+/* The label sits in the ring's inner disc and never reaches the stroke: the goal
+   itself ("of 30 XP") belongs next to the ring, not squeezed inside it. */
+.ring-label { position: absolute; inset: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 21px; font-weight: 700; line-height: 1; text-align: center; }
+.ring-label small { display: block; font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; color: var(--faint); margin-top: 3px; }
+/* Four digits at 21px would touch the stroke. */
+.ring-label.is-long { font-size: 16px; }
 
 /* ---------- buttons: sharp, tactile, hard-shadow press ---------- */
 .btn {
@@ -122,19 +140,19 @@ body[data-session] .tabbar, body[data-session] .topbar { display: none; }
   cursor: pointer; line-height: 1; text-decoration: none; white-space: nowrap;
   transition: transform var(--dur-fast) var(--ease-snap), box-shadow var(--dur-fast), background var(--dur-fast);
 }
-.btn:hover { text-decoration: none; background: var(--surface-2); }
+@media (hover: hover) { .btn:hover { text-decoration: none; background: var(--surface-2); } }
 .btn:active { transform: translate(2px, 2px); box-shadow: none; }
 .btn .px { color: currentColor; }
 .btn--primary { background: var(--accent); color: var(--on-accent); border-color: color-mix(in srgb, var(--accent), #000 25%); box-shadow: 2px 2px 0 color-mix(in srgb, var(--accent), #000 35%); }
-.btn--primary:hover { background: color-mix(in srgb, var(--accent), #fff 8%); }
+@media (hover: hover) { .btn--primary:hover { background: color-mix(in srgb, var(--accent), #fff 8%); } }
 .btn--ok { background: var(--green); color: #fff; border-color: color-mix(in srgb, var(--green), #000 25%); box-shadow: 2px 2px 0 color-mix(in srgb, var(--green), #000 35%); }
-.btn--ok:hover { background: color-mix(in srgb, var(--green), #fff 8%); }
+@media (hover: hover) { .btn--ok:hover { background: color-mix(in srgb, var(--green), #fff 8%); } }
 .btn--danger { background: var(--error); color: var(--on-danger); border-color: color-mix(in srgb, var(--error), #000 25%); box-shadow: 2px 2px 0 color-mix(in srgb, var(--error), #000 35%); }
-.btn--danger:hover { background: color-mix(in srgb, var(--error), #fff 8%); }
+@media (hover: hover) { .btn--danger:hover { background: color-mix(in srgb, var(--error), #fff 8%); } }
 .btn--ghost { background: transparent; box-shadow: none; border-color: transparent; color: var(--accent-text); }
-.btn--ghost:hover { background: var(--accent-dim); }
+@media (hover: hover) { .btn--ghost:hover { background: var(--accent-dim); } }
 .btn--quiet { background: transparent; box-shadow: none; border-color: transparent; color: var(--muted); }
-.btn--quiet:hover { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) { .btn--quiet:hover { background: var(--surface-2); color: var(--text); } }
 .btn--sm { min-height: 34px; padding: 7px 12px; font-size: 9px; }
 .btn--lg { min-height: 54px; padding: 14px 26px; font-size: 12px; }
 .btn--block { display: flex; width: 100%; }
@@ -159,7 +177,7 @@ body[data-session] .tabbar, body[data-session] .topbar { display: none; }
 .card > * + * { margin-top: 12px; }
 .card--sunk { background: var(--sunk); box-shadow: none; border-color: var(--line); }
 .card--hover { cursor: pointer; transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base); }
-.card--hover:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); }
+@media (hover: hover) { .card--hover:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); } }
 .card--flat { box-shadow: none; }
 .card-head { display: flex; align-items: center; gap: 10px; }
 .card-head h3 { flex: 1; min-width: 0; }
@@ -172,7 +190,7 @@ body[data-session] .tabbar, body[data-session] .topbar { display: none; }
   color: inherit; text-decoration: none; text-align: left; background: transparent; border-left: 0; border-right: 0; border-top: 0; width: 100%;
 }
 .list-row:last-child { border-bottom: 0; }
-.list-row:hover { background: var(--surface-2); text-decoration: none; }
+@media (hover: hover) { .list-row:hover { background: var(--surface-2); text-decoration: none; } }
 .list-row .grow { flex: 1; min-width: 0; }
 .list-row .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-row .hz { white-space: nowrap; }
@@ -181,8 +199,10 @@ body[data-session] .tabbar, body[data-session] .topbar { display: none; }
 .row--wrap { flex-wrap: wrap; }
 .row .grow { flex: 1; min-width: 0; }
 .stack { display: flex; flex-direction: column; gap: var(--gap, 12px); }
-.grid-2 { display: grid; grid-template-columns: 1fr; gap: 14px; }
-@media (min-width: 640px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
+/* minmax(0, 1fr), not 1fr: a 1fr track cannot shrink below its widest child, and an
+   iOS date input is wider than a phone column. */
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 640px) { .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .pill {
   font-family: var(--font-mono); font-size: 12px;
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
@@ -324,7 +344,7 @@ html[data-theme="dark"] .scrim { background: rgba(0, 0, 0, .6); }
   box-shadow: var(--shadow-sm); cursor: pointer; color: var(--text); font-family: var(--font-body); font-size: 17px;
   transition: transform var(--dur-fast) var(--ease-snap), box-shadow var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
 }
-.option:hover { background: var(--surface-2); }
+@media (hover: hover) { .option:hover { background: var(--surface-2); } }
 .option:active { transform: translate(2px, 2px); box-shadow: none; }
 .option.is-selected { border-color: var(--accent); background: var(--accent-dim); box-shadow: 2px 2px 0 var(--accent); }
 .option.is-correct { border-color: var(--green); background: var(--green-dim); box-shadow: 2px 2px 0 var(--green); }
@@ -361,7 +381,7 @@ html[data-theme="dark"] .scrim { background: rgba(0, 0, 0, .6); }
 .path-node { position: relative; z-index: 1; display: flex; align-items: center; gap: 14px; width: min(100%, 360px); text-decoration: none; color: inherit; }
 .path-node:nth-child(4n+2) { transform: translateX(28px); }
 .path-node:nth-child(4n+4) { transform: translateX(-28px); }
-.path-node:hover { text-decoration: none; }
+@media (hover: hover) { .path-node:hover { text-decoration: none; } }
 .path-btn {
   flex: none; width: 66px; height: 66px; display: grid; place-items: center;
   background: var(--surface); border: var(--bw-strong) solid var(--line-strong); border-radius: var(--r-md);
@@ -410,7 +430,7 @@ html[data-theme="dark"] .scrim { background: rgba(0, 0, 0, .6); }
 .coach .bubble::before { top: auto; bottom: 14px; }
 
 /* ---------- pixel confetti ---------- */
-.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 3; }
+.confetti { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 450; }
 .confetti i { position: absolute; top: -12px; width: 8px; height: 8px; background: var(--text); opacity: .9;
   left: var(--x); animation: confetti-fall var(--d, 1.8s) linear var(--delay, 0s) both; }
 .confetti i:nth-child(3n) { background: var(--accent); }
@@ -431,3 +451,78 @@ html[data-theme="dark"] .scrim { background: rgba(0, 0, 0, .6); }
 .spark i { flex: 1; background: var(--muted); min-height: 2px; border-radius: 1px 1px 0 0; }
 .spark i.is-today { background: var(--accent); }
 .spark i.is-zero { background: var(--line-strong); }
+
+/* ============================================================
+   Phone rules (docs/ARCHITECTURE.md §8.8)
+   ============================================================ */
+
+/* A tap is not a hover: no grey flash, no text selection when a control is held,
+   and no iOS callout over a button. */
+html { -webkit-tap-highlight-color: transparent; }
+button, .btn, .tab, .option, .tile, .path-btn, .seg button {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+
+/* iOS draws date and time inputs at their intrinsic width, wider than a phone
+   column, and collapses them to nothing when empty. */
+input[type="date"], input[type="time"], input[type="month"], input[type="datetime-local"] {
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 44px;
+  font-size: 16px; line-height: 1.3; text-align: left;
+}
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.3em; }
+input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
+
+/* Long pinyin and long English meanings wrap inside their box instead of pushing
+   it past the edge of a 375 px screen. */
+.card, .list-row, .option, .banner-detail, .bubble, .example, .win-body { overflow-wrap: anywhere; }
+
+/* While a field has focus, the keyboard owns the bottom of the screen: a fixed tab
+   bar would ride up on top of it and cover what the learner is typing. */
+@media (max-width: 899px) {
+  body:has(:is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), textarea, select):focus) .tabbar { display: none; }
+}
+
+/* ---------- speaking: the record control (js/speech.js) ---------- */
+.rec { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+/* The kit's small buttons are 34px; a control used mid-sentence with one thumb gets 44. */
+.rec .btn { min-height: 44px; }
+.rec-btn.is-recording { border-color: var(--error); color: var(--error); box-shadow: 2px 2px 0 var(--error); }
+.rec-btn.is-recording .px { animation: caret 1s steps(1) infinite; }
+.rec-time { font-size: 12px; color: var(--muted); min-width: 4ch; }
+
+/* ---------- a word as the hero of a card (js/hanzi.js wordHero) ----------
+   In "small" mode the reading is the word and the characters are its footnote. */
+.word-hero { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; max-width: 100%; }
+.wh-reading { font-family: var(--font-mono); font-weight: 700; color: var(--text); line-height: 1.15; overflow-wrap: anywhere; }
+.wh-reading.is-zhuyin { font-family: var(--font-zh); font-weight: 500; letter-spacing: .04em; }
+.wh-second { font-family: var(--font-mono); color: var(--muted); line-height: 1.2; }
+.wh-second.is-zhuyin { font-family: var(--font-zh); letter-spacing: .04em; }
+.wh-hanzi { font-family: var(--font-zh); color: var(--muted); line-height: 1.2; }
+.word-hero--xl .wh-reading { font-size: clamp(30px, 9vw, 44px); }
+.word-hero--xl .wh-second { font-size: 15px; }
+.word-hero--xl .wh-hanzi { font-size: 22px; }
+.word-hero--lg .wh-reading { font-size: 28px; }
+.word-hero--lg .wh-second { font-size: 14px; }
+.word-hero--lg .wh-hanzi { font-size: 18px; }
+.word-hero--md .wh-reading { font-size: 20px; }
+.word-hero--md .wh-second { font-size: 13px; }
+.word-hero--md .wh-hanzi { font-size: 15px; }
+.word-hero--sm .wh-reading { font-size: 16px; }
+.word-hero--sm .wh-second { font-size: 12px; }
+.word-hero--sm .wh-hanzi { font-size: 13px; }
+.word-hero.is-left { align-items: flex-start; text-align: left; }
+
+.word-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+.wl-primary { font-family: var(--font-mono); font-size: 17px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.wl-primary.is-zhuyin { font-family: var(--font-zh); font-weight: 500; letter-spacing: .04em; }
+.wl-primary.is-hanzi { font-family: var(--font-zh); font-size: 22px; font-weight: 500; }
+.wl-secondary { font-family: var(--font-mono); font-size: 13px; color: var(--faint); }
+.wl-secondary.is-hanzi, .wl-secondary.is-zhuyin { font-family: var(--font-zh); font-size: 14px; }
+
+/* An example sentence in speaking focus: reading first, then meaning, then 字 small. */
+.example--speak .ex-reading { font-family: var(--font-mono); font-size: 16px; color: var(--text); line-height: 1.4; }
+.example--speak .ex-reading.is-zhuyin { font-family: var(--font-zh); }
+.example--speak .tr { font-size: 14px; color: var(--muted); margin-top: 2px; }
+.example--speak .ex-hanzi { font-family: var(--font-zh); font-size: 14px; color: var(--faint); margin-top: 2px; }

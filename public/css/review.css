@@ -25,7 +25,7 @@
 }
 .rv-tpl { padding: 6px 12px; border-bottom: var(--bw) solid var(--line); margin: 0; }
 .rv-tpl:last-child { border-bottom: 0; }
-.rv-tpl:hover { background: var(--surface-2); }
+@media (hover: hover) { .rv-tpl:hover { background: var(--surface-2); } }
 .rv-tpl .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rv-tpl-name { font-size: 15px; color: var(--text); line-height: 1.2; }
 .rv-tpl-sides {
@@ -88,16 +88,63 @@
 .rv-audio .btn--icon.btn--lg { width: 96px; height: 96px; min-height: 96px; border-radius: var(--r-md); }
 .rv-audio .pl-eyebrow::after { display: none; }
 
+/* ---------- speaking: the say card and the display rules ---------- */
+/* The English is the whole question on a say / production front, so it is set
+   large, in Karla: it is body copy, never pixel type. */
+.rv-meaning--front .meaning { font-size: 28px; line-height: 1.25; font-weight: 500; }
+.rv-instruction { justify-content: center; margin-bottom: -6px; }
+
+/* Record yourself, and "Check me" where the browser can listen. One wrapping row,
+   centred, with the recognition verdict on its own line underneath. */
+.rv-say-tools { width: 100%; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.rv-say-tools .rec { flex: 0 1 auto; }
+/* speech.js draws its buttons small; on a card they are the main controls and
+   need a full 44px tap target. Slimmer side padding keeps Record and Check on
+   one line at 375px, even while Check's label says "Listening…". */
+.rv-card .rec .btn, .rv-check { min-height: 44px; padding: 10px 11px; gap: 7px; }
+.rv-heard {
+  flex: 1 1 100%;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 6px;
+  font-size: 14px; line-height: 1.35; color: var(--muted); text-align: center;
+}
+/* Green only when recognition heard the word: a verdict, so a STATE colour. */
+.rv-heard.is-ok { color: var(--green); }
+.rv-heard-zh { font-family: var(--font-zh); color: var(--text); }
+
+/* The back's model voice, with the learner's own take moved beside it. */
+.rv-listen-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.rv-listen-row .rec { flex: 0 1 auto; }
+
+/* "small" mode: the characters as the reading's footnote, quiet but legible. */
+.rv-hanzi-note { font-family: var(--font-zh); font-size: 22px; line-height: 1.2; color: var(--muted); }
+
+/* A back example beside its play button; the sentence takes the room. */
+.rv-example { display: flex; align-items: flex-start; gap: 8px; }
+.rv-example > .example { flex: 1 1 auto; min-width: 0; }
+.rv-example > .btn { flex: none; }
+.rv-example--blank { display: block; }
+
 /* ---------- session footer ---------- */
-/* Plumi holds the left of the footer; on a phone it gives the grade pad the
-   whole width instead of competing with it. */
+/* Plumi holds the left of the footer. On a phone the four grades share ONE row,
+   each label over its interval: a 2×2 pad took 120px from a 667px screen, which
+   pushed the answer the learner just revealed below the fold. */
 .session-footer .rv-bird { flex: 0 0 auto; display: flex; align-items: center; }
-.rv-actions { flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
-.rv-actions .btn { padding: 10px 8px; gap: 6px; min-width: 0; }
-.rv-actions .btn .kbd { flex: none; }
+.rv-actions { flex: 1 1 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; min-width: 0; }
+.rv-actions .btn { flex-direction: column; gap: 4px; min-height: 54px; padding: 6px 2px; min-width: 0; font-size: 10px; letter-spacing: 0; }
+.rv-actions .btn .kbd { flex: none; font-size: 8px; padding: 1px 4px; }
+.rv-grade { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 @media (min-width: 560px) {
   .session-footer .rv-bird { flex: 1 1 auto; }
-  .rv-actions { grid-template-columns: repeat(4, 1fr); max-width: 440px; }
+  .rv-actions { max-width: 440px; gap: 8px; }
+  .rv-actions .btn { flex-direction: row; gap: 6px; min-height: 44px; padding: 10px 8px; font-size: 11px; letter-spacing: .03em; }
+}
+
+/* A 667px-tall phone: tighter card padding so a say card's front and back fit
+   together above the grade row; a longer card still scrolls. */
+@media (max-height: 720px) {
+  .rv-body { padding: 18px 14px 20px; }
+  .rv-fields { gap: 12px; }
+  .rv-back { padding-top: 12px; }
 }
 
 /* Plumi's bubble points sideways by default, which walks off the edge of a
@@ -113,6 +160,9 @@
    `transform: none` and would undo the centring. */
 .rv-end-hero .bubble { left: 50%; right: auto; top: auto; bottom: calc(100% + 6px); translate: -50% 0; min-width: 0; white-space: nowrap; }
 .rv-end-hero .bubble::before { left: 50%; margin-left: -3px; top: auto; bottom: -4px; border: 0; border-right: var(--bw) solid var(--line-strong); border-bottom: var(--bw) solid var(--line-strong); }
+/* The bubble hangs above Plumi (it lives in the bird's own box), which put it
+   straight over the window's title bar on a phone: the hero reserves that room. */
+.rv-end-hero { padding-top: 46px; }
 .rv-end-title { margin-top: 10px; }
 .rv-end-actions { flex: 1 1 auto; display: flex; gap: 10px; min-width: 0; }
 .rv-end-actions .btn { flex: 1 1 auto; min-width: 0; padding: 10px 10px; }

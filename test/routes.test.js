@@ -21,7 +21,7 @@ const { initStore, flushAll, coll, doc } = await import('../server/store.js');
 const { DEFAULT_SETTINGS, DEFAULT_PROGRESS } = await import('../server/defaults.js');
 const { mountRoutes, ROUTERS } = await import('../server/routes/index.js');
 
-for (const name of ['words', 'lessons', 'notes', 'usage']) coll(name);
+for (const name of ['words', 'lessons', 'notes', 'materials', 'usage']) coll(name);
 doc('settings', DEFAULT_SETTINGS);
 doc('progress', DEFAULT_PROGRESS);
 doc('suggestions', {});
@@ -50,6 +50,43 @@ after(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
+/* A real, tiny PDF with a text layer, so pdfinfo, pdftoppm and pdftotext have
+   something to read. Offsets are counted, because a PDF with a wrong xref table is
+   a PDF poppler repairs silently and a test that proves nothing. */
+function makePdf(pageCount) {
+  const bodies = {
+    1: '<< /Type /Catalog /Pages 2 0 R >>',
+    3: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  };
+  const kids = [];
+  let next = 4;
+  for (let i = 1; i <= pageCount; i++) {
+    const pageId = next++;
+    const contentId = next++;
+    kids.push(`${pageId} 0 R`);
+    const stream = `BT /F1 24 Tf 72 720 Td (Page ${i}: ni hao, xie xie, zai jian) Tj ET`;
+    bodies[contentId] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+    bodies[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`;
+  }
+  bodies[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pageCount} >>`;
+  const max = next - 1;
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  for (let id = 1; id <= max; id++) {
+    offsets[id] = Buffer.byteLength(out, 'latin1');
+    out += `${id} 0 obj\n${bodies[id]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(out, 'latin1');
+  out += `xref\n0 ${max + 1}\n0000000000 65535 f \n`;
+  for (let id = 1; id <= max; id++) out += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${max + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+async function uploadPdf(query, body = makePdf(6), type = 'application/pdf') {
+  return fetch(`${base}/api/materials?${query}`, { method: 'POST', headers: { 'content-type': type }, body });
+}
+
 async function raw(method, url, body) {
   return fetch(`${base}/api${url}`, {
     method,
@@ -74,11 +111,13 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAY
 const PNG_URL = `data:image/png;base64,${PNG}`;
 
 const CHALLENGE_SEED = [
-  { hanzi: '貓', pinyin: 'māo', meaning: 'cat', pos: 'n', examples: [{ zh: '我有一隻貓。', translation: 'I have a cat.' }] },
-  { hanzi: '狗', pinyin: 'gǒu', meaning: 'dog', pos: 'n', examples: [{ zh: '他的狗很大。', translation: 'His dog is big.' }] },
+  // Three examples carry pinyin: order-pinyin builds sentences from example syllables,
+  // and a pool without any would make that type impossible to build (§8.4).
+  { hanzi: '貓', pinyin: 'māo', meaning: 'cat', pos: 'n', examples: [{ zh: '我有一隻貓。', pinyin: 'wǒ yǒu yì zhī māo.', translation: 'I have a cat.' }] },
+  { hanzi: '狗', pinyin: 'gǒu', meaning: 'dog', pos: 'n', examples: [{ zh: '他的狗很大。', pinyin: 'tā de gǒu hěn dà.', translation: 'His dog is big.' }] },
   { hanzi: '書', pinyin: 'shū', meaning: 'book', pos: 'n', examples: [{ zh: '我看書。', translation: 'I read a book.' }] },
   { hanzi: '水', pinyin: 'shuǐ', meaning: 'water', pos: 'n', examples: [{ zh: '我喝水。', translation: 'I drink water.' }] },
-  { hanzi: '車', pinyin: 'chē', meaning: 'car', pos: 'n', examples: [{ zh: '這是我的車。', translation: 'This is my car.' }] },
+  { hanzi: '車', pinyin: 'chē', meaning: 'car', pos: 'n', examples: [{ zh: '這是我的車。', pinyin: 'zhè shì wǒ de chē.', translation: 'This is my car.' }] },
   { hanzi: '花', pinyin: 'huā', meaning: 'flower', pos: 'n', examples: [{ zh: '花很漂亮。', translation: 'The flowers are pretty.' }] },
   { hanzi: '山', pinyin: 'shān', meaning: 'mountain', pos: 'n', examples: [{ zh: '山很高。', translation: 'The mountain is high.' }] },
   { hanzi: '魚', pinyin: 'yú', meaning: 'fish', pos: 'n', examples: [{ zh: '我吃魚。', translation: 'I eat fish.' }] },
@@ -109,13 +148,19 @@ test('settings: GET hides the key, PUT deep-merges and validates', async () => {
   assert.equal(first.body.script, 'zhuyin');
   assert.equal(first.body.cardTemplates.length, DEFAULT_SETTINGS.cardTemplates.length);
 
-  // A partial body must not wipe its siblings.
-  const put = await PUT('/settings', { dailyGoalXp: 40, ai: { models: { extract: 'openai/gpt-5' } }, nativeLanguage: 'fr' });
+  // The model order always comes back complete and inside the allow-list.
+  assert.deepEqual(first.body.ai.priority, DEFAULT_SETTINGS.ai.priority);
+  assert.equal(first.body.ai.models, undefined, 'the retired per-task model map is never sent');
+
+  // A partial body must not wipe its siblings, and a partial order is completed.
+  const put = await PUT('/settings', { dailyGoalXp: 40, ai: { priority: ['google/gemini-2.5-flash-lite'] }, nativeLanguage: 'fr' });
   assert.equal(put.status, 200);
   assert.equal(put.body.dailyGoalXp, 40);
   assert.equal(put.body.nativeLanguage, 'fr');
-  assert.equal(put.body.ai.models.extract, 'openai/gpt-5');
-  assert.equal(put.body.ai.models.default, DEFAULT_SETTINGS.ai.models.default, 'the other model slots survive');
+  assert.deepEqual(put.body.ai.priority, [
+    'google/gemini-2.5-flash-lite', 'google/gemini-3.5-flash-lite', 'google/gemini-3.1-flash-lite', 'deepseek/deepseek-v4-flash',
+  ]);
+  assert.equal(put.body.ai.monthlyBudgetUsd, DEFAULT_SETTINGS.ai.monthlyBudgetUsd, 'the other ai fields survive');
   assert.equal(put.body.newWordsPerDay, DEFAULT_SETTINGS.newWordsPerDay);
 
   // The key goes in and only comes back masked.
@@ -143,7 +188,9 @@ test('settings: GET hides the key, PUT deep-merges and validates', async () => {
     [{ cardTemplates: 'nope' }, 'templates not an array'],
     [{ cardTemplates: [{ id: 'a', front: ['hanzi'], back: ['nonsense'] }] }, 'unknown card field'],
     [{ cardTemplates: [{ id: 'a', front: ['hanzi'], back: [] }, { id: 'a', front: ['meaning'], back: [] }] }, 'duplicate template id'],
-    [{ ai: { models: { nope: 'x' } } }, 'unknown model slot'],
+    [{ ai: { models: { extract: 'google/gemini-3.5-flash-lite' } } }, 'the retired per-task model map'],
+    [{ ai: { priority: 'google/gemini-3.5-flash-lite' } }, 'priority that is not a list'],
+    [{ ai: { priority: ['anthropic/claude-sonnet-4.5'] } }, 'a model the key does not allow'],
   ]) {
     const res = await PUT('/settings', bodyIn);
     assert.equal(res.status, 400, `${why} must be rejected`);
@@ -151,6 +198,59 @@ test('settings: GET hides the key, PUT deep-merges and validates', async () => {
   }
   // A rejected PUT changed nothing.
   assert.equal((await GET('/settings')).body.dailyGoalXp, 40);
+});
+
+test('ai: a model off the allowed list is refused before anything reaches OpenRouter', async () => {
+  // A key has to be present to get past the no-key check; it is never used,
+  // because both requests are rejected before runTask() is called.
+  await PUT('/settings', { ai: { apiKey: 'sk-or-v1-never-sent-000000' } });
+  try {
+    const tested = await POST('/ai/test', { model: 'anthropic/claude-sonnet-4.5' });
+    assert.equal(tested.status, 400);
+    assert.match(tested.body.error, /not on the allowed list/);
+
+    const note = await POST('/notes', { title: 'Allow-list', text: '你好' });
+    const processed = await POST(`/notes/${note.body.id}/process`, { model: 'openai/gpt-5' });
+    assert.equal(processed.status, 400);
+    assert.match(processed.body.error, /not on the allowed list/);
+    assert.equal((await GET(`/notes/${note.body.id}`)).body.status, 'new', 'a refused request starts no job');
+    await raw('DELETE', `/notes/${note.body.id}`);
+  } finally {
+    await PUT('/settings', { ai: { apiKey: '' } });
+  }
+});
+
+test('settings: goals and display are validated key by key and merge without wiping', async () => {
+  const put = await PUT('/settings', {
+    goals: { skills: ['speak', 'listen'], reasons: ['taiwan'], classes: 'regular', about: 'Classes with Carl.', onboardedAt: '2026-09-13T20:00:00Z' },
+    display: { hanzi: 'small' },
+  });
+  assert.equal(put.status, 200);
+  assert.deepEqual(put.body.goals.skills, ['speak', 'listen']);
+  assert.equal(put.body.goals.onboardedAt, '2026-09-13T20:00:00.000Z');
+  assert.equal(put.body.display.hanzi, 'small');
+
+  const partial = await PUT('/settings', { goals: { about: 'Twice a week.' } });
+  assert.deepEqual(partial.body.goals.skills, ['speak', 'listen'], 'a partial goals body keeps the skills');
+  assert.equal(partial.body.goals.about, 'Twice a week.');
+
+  for (const [body, why] of [
+    [{ goals: { skills: ['fly'] } }, 'an unknown skill'],
+    [{ goals: { classes: 'daily' } }, 'an unknown classes answer'],
+    [{ goals: { about: 'x'.repeat(501) } }, 'about over 500 characters'],
+    [{ goals: { onboardedAt: 'soon' } }, 'a date that is not a date'],
+    [{ display: { hanzi: 'tiny' } }, 'an unknown characters mode'],
+  ]) {
+    assert.equal((await PUT('/settings', body)).status, 400, `${why} must be rejected`);
+  }
+
+  const ids = (await GET('/settings')).body.cardTemplates.map((t) => t.id);
+  assert.deepEqual(ids.slice(0, 6), ['recognition', 'production', 'say', 'sound', 'listening', 'cloze'], 'every builtin is present');
+  const recorded = await PUT('/settings', { cardTemplates: [{ id: 'say', front: ['meaning', 'record'], back: ['reading'], builtin: true, enabled: true }] });
+  assert.equal(recorded.status, 200, 'the record field is a card field');
+  assert.deepEqual(recorded.body.cardTemplates.find((t) => t.id === 'say').front, ['meaning', 'record'], 'a builtin keeps the definition from the code');
+
+  await PUT('/settings', { goals: { onboardedAt: null, skills: [], reasons: [], about: '' }, display: { hanzi: '' }, cardTemplates: DEFAULT_SETTINGS.cardTemplates });
 });
 
 test('words: create, dedupe-merge, search, export, delete', async () => {
@@ -348,6 +448,10 @@ test('review: the queue, grading, XP and the streak', async () => {
 
 test('challenge: every question type builds a valid shape, finishing pays XP', async () => {
   const { QUESTION_TYPES } = await import('../server/lib/challenge.js');
+  const { normalizePinyin } = await import('../shared/zhuyin.js');
+  // Letters only, no tones, spaces or punctuation: what two readings of one
+  // sentence must share however the tiles were cut.
+  const letters = (p) => normalizePinyin(String(p || '').replace(/[^\p{L}\p{M}\s'0-9]/gu, ' '), { tones: false });
   const words = new Map((await GET('/words')).body.words.map((w) => [w.id, w]));
 
   function checkQuestion(q) {
@@ -368,6 +472,23 @@ test('challenge: every question type builds a valid shape, finishing pays XP', a
     if (q.type === 'type-pinyin') {
       assert.equal(q.prompt.hanzi, word.hanzi);
       assert.ok(q.answer.pinyin || q.answer.zhuyin);
+      return;
+    }
+    // §8.4: the speaking types.
+    if (q.type === 'speak') {
+      assert.ok(q.prompt.meaning, 'the learner is told what to say');
+      assert.equal(q.answer.hanzi, word.hanzi);
+      assert.ok(q.answer.pinyin || q.answer.zhuyin, 'and shown how it sounds');
+      assert.equal(q.answer.tts, word.hanzi);
+      return;
+    }
+    if (q.type === 'order-pinyin') {
+      assert.ok(q.tiles.length >= 3 && q.tiles.length <= 12);
+      assert.deepEqual([...q.answer].sort(), q.tiles.map((t) => t.id).sort(), 'answer covers every tile');
+      const byId = new Map(q.tiles.map((t) => [t.id, t.text]));
+      assert.equal(letters(q.answer.map((id) => byId.get(id)).join(' ')), letters(q.full.pinyin), 'the tiles rebuild the sentence');
+      assert.ok(word.examples.some((e) => e.zh === q.full.zh), 'from one of the word\'s examples');
+      assert.ok(typeof q.prompt.translation === 'string');
       return;
     }
     if (q.type === 'order') {
@@ -394,6 +515,19 @@ test('challenge: every question type builds a valid shape, finishing pays XP', a
       assert.equal(new Set(q.options.map((o) => o.hanzi)).size, 4);
       if (q.type === 'listen') assert.equal(q.prompt.tts, word.hanzi);
       else assert.equal(q.prompt.meaning, word.meaning);
+    } else if (q.type === 'listen-meaning') {
+      assert.equal(q.prompt.tts, word.hanzi);
+      assert.equal(answer.text, word.meaning);
+      assert.equal(new Set(q.options.map((o) => o.text)).size, 4);
+    } else if (q.type === 'mc-pinyin') {
+      assert.equal(q.prompt.meaning, word.meaning);
+      assert.equal(answer.pinyin, word.pinyin);
+      assert.equal(new Set(q.options.map((o) => o.pinyin)).size, 4, 'four different readings');
+    } else if (q.type === 'tones') {
+      assert.equal(answer.pinyin, word.pinyin);
+      assert.equal(new Set(q.options.map((o) => o.pinyin)).size, 4, 'four different tone patterns');
+      for (const o of q.options) assert.equal(letters(o.pinyin), letters(word.pinyin), 'only the tones differ');
+      assert.equal(letters(q.prompt.bare), letters(word.pinyin));
     } else if (q.type === 'cloze') {
       assert.ok(q.prompt.sentence.includes('▢'), 'the word is blanked out');
       assert.ok(!q.prompt.sentence.includes(word.hanzi));
@@ -531,7 +665,7 @@ test('notes: importing a draft creates a lesson, merges known words and pays XP'
   };
   const saved = await PUT(`/notes/${ids.note}/draft`, { draft });
   assert.equal(saved.status, 200);
-  assert.equal(saved.body.draft.words.length, 3);
+  assert.equal(saved.body.draft.lessons[0].words.length, 3, 'a legacy draft body is stored as one lesson');
   assert.equal((await PUT(`/notes/${ids.note}/draft`, { draft: { words: [] } })).status, 400, 'a draft needs a lesson');
 
   const before = (await GET('/stats')).body;
@@ -569,6 +703,138 @@ test('notes: importing a draft creates a lesson, merges known words and pays XP'
   assert.equal(fs.existsSync(path.join(dataDir, 'uploads', ids.note)), false);
   assert.equal((await GET(`/notes/${ids.note}`)).status, 404);
   assert.ok(coll('words').find((w) => w.hanzi === '茶'), 'the imported words stay');
+});
+
+test('materials: a PDF is uploaded, counted, thumbnailed and guarded', async (t) => {
+  const caps = await GET('/capabilities');
+  assert.equal(caps.status, 200);
+  assert.equal(typeof caps.body.documents, 'boolean');
+  assert.ok(Array.isArray(caps.body.officeTypes));
+  if (!caps.body.documents) { t.skip('poppler is not installed on this machine'); return; }
+
+  assert.equal((await uploadPdf('name=book.pdf')).status, 400, 'keeping it or not must be chosen');
+  assert.equal((await uploadPdf('name=notes.txt&keep=1', Buffer.from('hello'), 'text/plain')).status, 415, 'not a document');
+
+  const res = await uploadPdf(`name=${encodeURIComponent('華語 課本.pdf')}&keep=1`);
+  assert.equal(res.status, 201);
+  const m = await res.json();
+  assert.equal(m.pageCount, 6);
+  assert.equal(m.title, '華語 課本', 'the title comes from the file name');
+  assert.equal(m.keep, true);
+  assert.equal(m.textLayer, true);
+  assert.deepEqual(m.covered, []);
+  assert.ok(fs.existsSync(path.join(dataDir, 'materials', m.id, 'source.pdf')));
+  assert.ok((await GET('/materials')).body.materials.some((x) => x.id === m.id));
+
+  const thumb = await raw('GET', `/materials/${m.id}/pages/2/thumb?w=161`);
+  assert.equal(thumb.status, 200);
+  assert.match(thumb.headers.get('content-type'), /jpeg/);
+  assert.ok(fs.existsSync(path.join(dataDir, 'materials', m.id, 'thumbs', 'p2-w160.jpg')), 'widths snap to 40 px and are cached');
+  assert.equal((await GET(`/materials/${m.id}/pages/9/thumb`)).status, 404);
+  const file = await raw('GET', `/materials/${m.id}/file`);
+  assert.equal(file.status, 200);
+  assert.match(file.headers.get('content-type'), /pdf/);
+
+  assert.equal((await PUT(`/materials/${m.id}`, { pageOffset: 6 })).status, 400, 'an offset past the document');
+  const renamed = await PUT(`/materials/${m.id}`, { title: 'Book one', pageOffset: 1 });
+  assert.equal(renamed.body.title, 'Book one');
+  assert.equal(renamed.body.pageOffset, 1);
+
+  const notesBefore = (await GET('/notes')).body.notes.length;
+  assert.equal((await POST(`/materials/${m.id}/lessons`, { pages: '1-2' })).status, 400, 'no key, no lessons');
+  // A key is set only to get past that check; every body below is refused before
+  // a job could start, so nothing reaches OpenRouter.
+  await PUT('/settings', { ai: { apiKey: 'sk-or-v1-never-sent-000000' } });
+  try {
+    for (const [body, why] of [
+      [{ pages: 'chapter two' }, 'pages that are not pages'],
+      [{ pages: '5-6' }, 'printed page 6 is PDF page 7, past the end'],
+      [{ pages: '1-40', numbering: 'pdf' }, 'more than 20 pages in one run'],
+      [{ pages: '1', model: 'openai/gpt-5' }, 'a model off the allowed list'],
+      [{ pages: '1', classDate: 'yesterday' }, 'a class date that is not a date'],
+    ]) {
+      const refused = await POST(`/materials/${m.id}/lessons`, body);
+      assert.equal(refused.status, 400, why);
+      assert.equal(typeof refused.body.error, 'string');
+    }
+  } finally {
+    await PUT('/settings', { ai: { apiKey: '' } });
+  }
+  assert.equal((await GET('/notes')).body.notes.length, notesBefore, 'a refused request leaves no note behind');
+
+  assert.equal((await DEL(`/materials/${m.id}`)).status, 200);
+  assert.equal(fs.existsSync(path.join(dataDir, 'materials', m.id)), false);
+  assert.equal((await GET(`/materials/${m.id}`)).status, 404);
+});
+
+test('notes: a two-lesson draft from a document imports both lessons and records the pages', async () => {
+  const caps = (await GET('/capabilities')).body;
+  const kept = caps.documents ? await (await uploadPdf('name=unit.pdf&keep=1', makePdf(3))).json() : null;
+  const once = caps.documents ? await (await uploadPdf('name=handout.pdf&keep=0', makePdf(2))).json() : null;
+  const lessons = [
+    {
+      lesson: { title: 'At the café', titleZh: '在咖啡店', summary: 'Ordering.', sections: [], grammar: [], dialogue: [] },
+      words: [{ hanzi: '拿鐵', pinyin: 'ná tiě', meaning: 'latte' }, { hanzi: '方糖', pinyin: 'fāng táng', meaning: 'sugar cube' }],
+    },
+    {
+      lesson: { title: 'Asking the way', titleZh: '問路', summary: 'Directions.', sections: [], grammar: [], dialogue: [] },
+      words: [{ hanzi: '右轉', pinyin: 'yòu zhuǎn', meaning: 'turn right' }, { hanzi: '拿鐵', pinyin: 'ná tiě', meaning: 'latte' }],
+    },
+  ];
+  // The extract job normally writes the draft; the store is written directly so the
+  // import path is tested without a model.
+  const draftNote = (material, draftLessons) => coll('notes').insert({
+    title: 'Unit 3', classDate: '2026-09-12', text: '', images: [], status: 'draft', jobId: null, imported: null, model: '', usage: null, error: null,
+    source: material ? { materialId: material.id, title: material.title, pages: [1, 2, 3], printed: '1–3', numbering: 'pdf', offset: 0, split: 'per-range' } : null,
+    draft: { lessons: draftLessons },
+  });
+  const note = draftNote(kept, lessons);
+
+  assert.equal((await GET(`/notes/${note.id}`)).body.draft.lessons.length, 2);
+  const row = (await GET('/notes')).body.notes.find((n) => n.id === note.id);
+  assert.equal(row.draftLessons, 2);
+  assert.equal(row.draftWords, 4);
+
+  assert.equal((await POST(`/notes/${note.id}/import`, { lessons: [{ words: [5] }] })).status, 400, 'a bad index imports nothing');
+  assert.equal((await POST(`/notes/${note.id}/import`, { lessons: [{ skip: true }, { skip: true }] })).status, 400, 'skipping every lesson is refused');
+  assert.equal((await GET('/lessons')).body.lessons.filter((l) => l.noteId === note.id).length, 0, 'the refusals wrote nothing');
+
+  const imported = await POST(`/notes/${note.id}/import`, { lessons: [{ words: 'all' }, { words: [0, 1] }] });
+  assert.equal(imported.status, 200);
+  assert.equal(imported.body.lessonIds.length, 2);
+  assert.equal(imported.body.lessonId, imported.body.lessonIds[0]);
+  assert.equal(imported.body.xp, 20, '10 XP per lesson');
+  assert.equal(imported.body.created, 3, 'the latte in both lessons is one new word');
+  assert.deepEqual(imported.body.mergedHanzi, [], 'a word two lessons of one import share is not "already known"');
+  const second = (await GET(`/lessons/${imported.body.lessonIds[1]}`)).body;
+  assert.equal(second.title, 'Asking the way');
+  assert.equal(second.words.length, 2, 'the shared word is listed in both lessons');
+
+  if (kept) {
+    const after = (await GET(`/materials/${kept.id}`)).body;
+    assert.deepEqual(after.covered.map((c) => c.pages), [[1, 2, 3]], 'the pages are marked as covered');
+    assert.deepEqual(after.covered[0].lessonIds, imported.body.lessonIds);
+  }
+  if (once) {
+    assert.ok((await GET('/materials')).body.materials.some((x) => x.id === once.id), 'an unused use-once upload stays reachable');
+    const waiting = draftNote(once, lessons.slice(0, 1));
+    assert.ok((await GET('/materials')).body.materials.some((x) => x.id === once.id), 'a use-once document shows while a note waits on it');
+    assert.equal((await DEL(`/notes/${waiting.id}`)).status, 200);
+    assert.equal((await GET(`/materials/${once.id}`)).status, 404, 'and is deleted when nothing needs it any more');
+    assert.equal(fs.existsSync(path.join(dataDir, 'materials', once.id)), false);
+  }
+});
+
+test('notes: a note left processing by a restart is marked as interrupted', async () => {
+  const { recoverInterruptedNotes } = await import('../server/routes/notes.js');
+  const stuck = coll('notes').insert({ title: 'Stuck', text: 'x', images: [], status: 'processing', jobId: 'gone', draft: null, imported: null, model: '', usage: null, error: null });
+  assert.equal(recoverInterruptedNotes(), 1);
+  const after = (await GET(`/notes/${stuck.id}`)).body;
+  assert.equal(after.status, 'error');
+  assert.equal(after.jobId, null);
+  assert.match(after.error, /restarted/);
+  assert.equal(recoverInterruptedNotes(), 0, 'nothing else was stuck');
+  assert.equal((await DEL(`/notes/${stuck.id}`)).status, 200);
 });
 
 test('suggestions: without a key Today is told so, not shown an error', async () => {

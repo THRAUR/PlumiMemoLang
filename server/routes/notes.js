@@ -1,17 +1,24 @@
-/* Notes: what the learner pastes or photographs after class, and the AI pass
-   that turns it into a lesson draft. Photos arrive as data URLs (a phone camera
-   roll, no upload widget), are written under <dataDir>/uploads/<noteId>/ and are
-   only ever served back by name from that folder. */
+/* Notes: what the learner pastes or photographs after class, or a page selection
+   from one of their documents, and the AI pass that turns it into lesson drafts.
+   Photos arrive as data URLs (a phone camera roll, no upload widget), are written
+   under <dataDir>/uploads/<noteId>/ and are only ever served back by name from
+   that folder. Document pages are rendered from the material's PDF when the job
+   runs and are never stored. */
 import { Router } from 'express';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { coll, newId } from '../store.js';
 import { config } from '../config.js';
 import { runTask, hasApiKey } from '../ai/tasks.js';
+import { isAllowedModel } from '../ai/models.js';
 import { createJob, setProgress } from '../jobs.js';
 import { addXp, bumpDay, getStats, readSettings } from '../stats.js';
-import { deepMerge, isPlain } from '../defaults.js';
+import { isPlain } from '../defaults.js';
 import { upsertWord } from '../lib/words.js';
+import { draftLessons, normaliseDraft, draftWordCount, LESSONS_MAX } from '../lib/drafts.js';
+import { renderPage, pageText } from '../lib/documents.js';
+import { sourcePdf, releaseIfUnkept, recordCoverage } from '../lib/materials.js';
 import { nextOrder } from './lessons.js';
 
 const r = Router();
@@ -21,6 +28,10 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const EXCERPT = 200;
 const IMAGE_TYPES = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
 const STATUSES = ['new', 'processing', 'draft', 'imported', 'error'];
+/* A rendered page at 1400 px is about 120 KB of JPEG: 20 of them keep the request
+   to OpenRouter near 3 MB, and a textbook scan stays readable at that size. */
+const PAGE_LONG_SIDE = 1400;
+const PAGE_TEXT_CHARS = 2500;
 
 function bad(msg, status = 400) { return Object.assign(new Error(msg), { status }); }
 function str(v) { return v === undefined || v === null ? '' : String(v).trim(); }
@@ -31,7 +42,12 @@ function noteOr404(id) {
   return note;
 }
 
-function checkDate(v) {
+/* Every note leaves the server with its draft in the lessons shape (§8.5). */
+function publicNote(note) {
+  return note ? { ...note, draft: normaliseDraft(note.draft) } : note;
+}
+
+export function checkDate(v) {
   if (v === null || v === undefined || v === '') return null;
   const d = str(v);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw bad('classDate must look like 2026-09-11.');
@@ -101,12 +117,14 @@ async function writeImages(noteId, images) {
    fields that make notes.json big. */
 function listShape(note) {
   const { draft, text, ...rest } = note;
+  const lessons = draftLessons(draft);
   return {
     ...rest,
     excerpt: String(text || '').trim().slice(0, EXCERPT),
     imageCount: (note.images || []).length,
-    hasDraft: Boolean(draft),
-    draftWords: draft?.words?.length || 0,
+    hasDraft: lessons.length > 0,
+    draftLessons: lessons.length,
+    draftWords: draftWordCount(draft),
   };
 }
 
@@ -114,6 +132,98 @@ function byNewest(a, b) {
   return String(b.classDate || b.createdAt || '').localeCompare(String(a.classDate || a.createdAt || ''))
     || String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
 }
+
+/* ---------- the extract job, shared with POST /materials/:id/lessons ---------- */
+
+async function notesInput(note) {
+  const images = [];
+  for (const img of note.images || []) {
+    const buf = await fs.readFile(path.join(config.dataDir, img.file));
+    images.push({ name: img.name, type: img.type, dataUrl: `data:${img.type};base64,${buf.toString('base64')}` });
+  }
+  return { title: note.title, text: note.text || '', images, split: 'one' };
+}
+
+async function documentInput(note, job) {
+  const src = note.source;
+  const material = coll('materials').get(src.materialId);
+  if (!material) throw bad('The document these pages came from was deleted.');
+  const file = sourcePdf(material.id);
+  try { await fs.access(file); } catch { throw bad('The document file is missing from disk.'); }
+  // The offset the learner used when they picked the pages, not today's, so the
+  // labels always match what they typed.
+  const offset = Number(src.offset ?? material.pageOffset) || 0;
+  const label = (p) => (offset ? `page ${p - offset} (PDF page ${p})` : `page ${p}`);
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'pml-pages-'));
+  try {
+    const images = [];
+    const texts = [];
+    for (const [i, p] of src.pages.entries()) {
+      setProgress(job, `Reading page ${i + 1} of ${src.pages.length}…`);
+      const out = await renderPage(file, p, path.join(work, `p${p}.jpg`), { longSide: PAGE_LONG_SIDE, quality: 78 });
+      const buf = await fs.readFile(out);
+      images.push({ name: `page-${p}.jpg`, type: 'image/jpeg', dataUrl: `data:image/jpeg;base64,${buf.toString('base64')}` });
+      if (material.textLayer) {
+        const t = await pageText(file, p, { maxChars: PAGE_TEXT_CHARS });
+        if (t) texts.push(`[${label(p)}]\n${t}`);
+      }
+    }
+    return {
+      title: note.title,
+      text: texts.join('\n\n'),
+      instructions: note.text || '',
+      images,
+      pages: src.pages.map((p) => ({ pdf: p, printed: p - offset })),
+      split: src.split || 'auto',
+      source: { title: material.title },
+    };
+  } finally {
+    await fs.rm(work, { recursive: true, force: true });
+  }
+}
+
+export function startExtractJob(note, { settings, prefer = '' } = {}) {
+  const s = settings || readSettings();
+  const job = createJob('extract', async (j) => {
+    setProgress(j, note.source ? 'Reading the pages…' : 'Reading your notes…');
+    try {
+      const input = note.source ? await documentInput(note, j) : await notesInput(note);
+      // Known hanzi let the model mark words the learner already has instead of
+      // inventing duplicates.
+      const knownHanzi = [...new Set(coll('words').all().map((w) => str(w.hanzi)).filter(Boolean))];
+      const out = await runTask('extract', {
+        ...input,
+        classDate: note.classDate,
+        learner: { nativeLanguage: s.nativeLanguage, level: s.level, script: s.script },
+        knownHanzi,
+      }, { settings: s, prefer, onProgress: (t) => setProgress(j, t) });
+      return publicNote(coll('notes').update(note.id, {
+        draft: out.result, model: out.model, usage: out.usage, status: 'draft', error: null,
+      }));
+    } catch (e) {
+      coll('notes').update(note.id, { status: 'error', error: e?.message || String(e) });
+      throw e;      // the job must fail too, or the client waits for nothing
+    }
+  });
+  // Written before the job's first await runs, so a poll never sees "new".
+  coll('notes').update(note.id, { status: 'processing', jobId: job.id, error: null });
+  return job;
+}
+
+/* Jobs live in memory, so a note that was "processing" when the server stopped has
+   nobody working on it, and a phone polling its job would wait forever. Called
+   once at boot, before any request is served. */
+export function recoverInterruptedNotes() {
+  let recovered = 0;
+  for (const note of coll('notes').all()) {
+    if (note.status !== 'processing') continue;
+    coll('notes').update(note.id, { status: 'error', jobId: null, error: 'The server restarted while this was being processed. Try again.' });
+    recovered += 1;
+  }
+  return recovered;
+}
+
+/* ---------- routes ---------- */
 
 r.get('/notes', (req, res) => {
   res.json({ notes: [...coll('notes').all()].sort(byNewest).map(listShape) });
@@ -142,11 +252,11 @@ r.post('/notes', async (req, res) => {
     usage: null,
     error: null,
   });
-  res.status(201).json(note);
+  res.status(201).json(publicNote(note));
 });
 
 r.get('/notes/:id', (req, res) => {
-  res.json(noteOr404(req.params.id));
+  res.json(publicNote(noteOr404(req.params.id)));
 });
 
 r.put('/notes/:id', (req, res) => {
@@ -161,13 +271,14 @@ r.put('/notes/:id', (req, res) => {
     if (!STATUSES.includes(b.status)) throw bad(`status must be one of ${STATUSES.join(', ')}.`);
     patch.status = b.status;
   }
-  res.json(coll('notes').update(note.id, patch));
+  res.json(publicNote(coll('notes').update(note.id, patch)));
 });
 
 r.delete('/notes/:id', async (req, res) => {
   const note = noteOr404(req.params.id);
   await fs.rm(uploadDir(note.id), { recursive: true, force: true });
   coll('notes').remove(note.id);
+  if (note.source?.materialId) await releaseIfUnkept(note.source.materialId, { exceptNoteId: note.id });
   res.json({ ok: true });
 });
 
@@ -187,40 +298,12 @@ r.post('/notes/:id/process', (req, res) => {
   const note = noteOr404(req.params.id);
   const s = readSettings();
   if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
-  if (!str(note.text) && !(note.images || []).length) throw bad('This note is empty.');
+  if (!note.source && !str(note.text) && !(note.images || []).length) throw bad('This note is empty.');
+  // An optional model to start with. It must be on the allow-list; the rest of
+  // the learner's priority list stays behind it as the backup.
   const model = str(req.body?.model);
-  const settings = model ? deepMerge(s, { ai: { models: { extract: model } } }) : s;
-
-  const job = createJob('extract', async (j) => {
-    setProgress(j, 'Reading your notes…');
-    const images = [];
-    for (const img of note.images || []) {
-      const buf = await fs.readFile(path.join(config.dataDir, img.file));
-      images.push({ name: img.name, type: img.type, dataUrl: `data:${img.type};base64,${buf.toString('base64')}` });
-    }
-    // Known hanzi let the model mark words the learner already has instead of
-    // inventing duplicates.
-    const knownHanzi = [...new Set(coll('words').all().map((w) => str(w.hanzi)).filter(Boolean))];
-    try {
-      const out = await runTask('extract', {
-        title: note.title,
-        classDate: note.classDate,
-        text: note.text || '',
-        images,
-        learner: { nativeLanguage: s.nativeLanguage, level: s.level, script: s.script },
-        knownHanzi,
-      }, { settings, onProgress: (t) => setProgress(j, t) });
-      const next = coll('notes').update(note.id, {
-        draft: out.result, model: out.model, usage: out.usage, status: 'draft', error: null,
-      });
-      return next;
-    } catch (e) {
-      coll('notes').update(note.id, { status: 'error', error: e?.message || String(e) });
-      throw e;      // the job must fail too, or the client waits for nothing
-    }
-  });
-
-  coll('notes').update(note.id, { status: 'processing', jobId: job.id, error: null });
+  if (model && !isAllowedModel(model)) throw bad('That model is not on the allowed list.');
+  const job = startExtractJob(note, { settings: s, prefer: model });
   res.json({ jobId: job.id });
 });
 
@@ -228,76 +311,104 @@ r.put('/notes/:id/draft', (req, res) => {
   const note = noteOr404(req.params.id);
   if (note.status !== 'draft') throw bad('This note has no draft to edit.');
   const draft = req.body?.draft;
-  if (!isPlain(draft)) throw bad('Send { draft: { lesson, words } }.');
-  if (!isPlain(draft.lesson)) throw bad('The draft needs a lesson object.');
-  if (!Array.isArray(draft.words)) throw bad('The draft needs a words array.');
-  if (draft.words.length > 200) throw bad('That is too many words for one lesson (200 max).');
-  res.json(coll('notes').update(note.id, { draft: { ...draft, words: draft.words.filter(isPlain) } }));
+  if (!isPlain(draft)) throw bad('Send { draft: { lessons: [ { lesson, words } ] } }.');
+  // The legacy { lesson, words } body still means one lesson; a body with neither
+  // shape is a mistake, not an empty draft.
+  if (!Array.isArray(draft.lessons) && !isPlain(draft.lesson)) throw bad('The draft needs its lessons.');
+  const lessons = draftLessons(draft);
+  if (!lessons.length) throw bad('The draft needs at least one lesson.');
+  if (lessons.length > LESSONS_MAX) throw bad(`A draft holds at most ${LESSONS_MAX} lessons.`);
+  if (lessons.some((l) => l.words.length > 200)) throw bad('That is too many words for one lesson (200 max).');
+  res.json(publicNote(coll('notes').update(note.id, { draft: { lessons } })));
 });
 
-/* Import: the draft becomes a real lesson and real words. Every word goes
-   through the same dedupe as POST /words, so importing the same note twice
-   merges instead of doubling the dictionary. */
-r.post('/notes/:id/import', (req, res) => {
+/* Import: each draft lesson becomes a real lesson and real words. Every word goes
+   through the same dedupe as POST /words, so importing the same note twice merges
+   instead of doubling the dictionary. Everything is validated before anything is
+   written, so a bad index in lesson 3 cannot leave lessons 1 and 2 half-imported. */
+r.post('/notes/:id/import', async (req, res) => {
   const note = noteOr404(req.params.id);
-  const draft = note.draft;
-  if (!isPlain(draft) || !Array.isArray(draft.words)) throw bad('Process this note before importing it.');
+  const lessons = draftLessons(note.draft);
+  if (!lessons.length) throw bad('Process this note before importing it.');
   const b = isPlain(req.body) ? req.body : {};
-  const wantLesson = b.lesson === undefined ? true : Boolean(b.lesson);
+  const modern = Array.isArray(b.lessons);
+  if (modern && b.lessons.length > lessons.length) throw bad('That lesson is not in the draft.');
 
-  let picks;
-  if (b.words === undefined || b.words === 'all') picks = draft.words.map((_, i) => i);
-  else if (Array.isArray(b.words)) {
-    picks = [];
-    for (const raw of b.words) {
-      const i = Number(raw);
-      if (!Number.isInteger(i) || i < 0 || i >= draft.words.length) throw bad('That word is not in the draft.');
-      if (!picks.includes(i)) picks.push(i);
-    }
-  } else throw bad('words must be "all" or a list of draft indexes.');
-  if (!picks.length && !wantLesson) throw bad('Pick at least one word to import.');
+  const picks = lessons.map((l, i) => {
+    // Legacy { words, lesson } applies to the first lesson and imports only that one.
+    const item = modern ? (isPlain(b.lessons[i]) ? b.lessons[i] : {}) : i === 0 ? { words: b.words, lesson: b.lesson } : { skip: true };
+    if (item.skip) return null;
+    let idx;
+    if (item.words === undefined || item.words === 'all') idx = l.words.map((_, k) => k);
+    else if (Array.isArray(item.words)) {
+      idx = [];
+      for (const raw of item.words) {
+        const k = Number(raw);
+        if (!Number.isInteger(k) || k < 0 || k >= l.words.length) throw bad(lessons.length > 1 ? `That word is not in lesson ${i + 1} of the draft.` : 'That word is not in the draft.');
+        if (!idx.includes(k)) idx.push(k);
+      }
+    } else throw bad('words must be "all" or a list of draft indexes.');
+    return { idx, withLesson: item.lesson === undefined ? true : Boolean(item.lesson) };
+  });
+  if (!picks.some(Boolean)) throw bad('Pick at least one lesson to import.');
+  if (picks.every((p) => !p || (!p.idx.length && !p.withLesson))) throw bad('Pick at least one word to import.');
 
-  let lesson = null;
-  if (wantLesson && isPlain(draft.lesson)) {
-    const l = draft.lesson;
-    lesson = coll('lessons').insert({
-      title: str(l.title) || note.title || 'Lesson',
-      titleZh: str(l.titleZh),
-      summary: String(l.summary ?? '').trim(),
-      classDate: note.classDate || null,
-      noteId: note.id,
-      order: nextOrder(),
-      sections: Array.isArray(l.sections) ? l.sections.filter(isPlain) : [],
-      grammar: Array.isArray(l.grammar) ? l.grammar.filter(isPlain) : [],
-      dialogue: Array.isArray(l.dialogue) ? l.dialogue.filter(isPlain) : [],
-      wordIds: [],
-      status: 'new',
-    });
-  }
-
+  const lessonIds = [];
   const wordIds = [];
   const mergedHanzi = [];
-  let created = 0;
-  for (const i of picks) {
-    const d = draft.words[i];
-    if (!isPlain(d) || !str(d.hanzi)) continue;
-    const { word, merged } = upsertWord(d, { lessonId: lesson?.id || null, noteId: note.id });
-    if (!wordIds.includes(word.id)) wordIds.push(word.id);
-    if (merged) mergedHanzi.push(word.hanzi);
-    else created += 1;
+  const createdHere = new Set();
+  for (const [i, pick] of picks.entries()) {
+    if (!pick) continue;
+    const { lesson: l, words } = lessons[i];
+    let lesson = null;
+    if (pick.withLesson) {
+      lesson = coll('lessons').insert({
+        title: str(l.title) || note.title || 'Lesson',
+        titleZh: str(l.titleZh),
+        summary: String(l.summary ?? '').trim(),
+        classDate: note.classDate || null,
+        noteId: note.id,
+        order: nextOrder(),
+        sections: Array.isArray(l.sections) ? l.sections.filter(isPlain) : [],
+        grammar: Array.isArray(l.grammar) ? l.grammar.filter(isPlain) : [],
+        dialogue: Array.isArray(l.dialogue) ? l.dialogue.filter(isPlain) : [],
+        wordIds: [],
+        status: 'new',
+        source: note.source ? { materialId: note.source.materialId, title: note.source.title, printed: note.source.printed } : null,
+      });
+    }
+    const ids = [];
+    for (const k of pick.idx) {
+      const d = words[k];
+      if (!isPlain(d) || !str(d.hanzi)) continue;
+      const { word, merged } = upsertWord(d, { lessonId: lesson?.id || null, noteId: note.id });
+      if (!ids.includes(word.id)) ids.push(word.id);
+      if (!wordIds.includes(word.id)) wordIds.push(word.id);
+      // A word two lessons of this import share is new, not "already known".
+      if (!merged) createdHere.add(word.id);
+      else if (!createdHere.has(word.id) && !mergedHanzi.includes(word.hanzi)) mergedHanzi.push(word.hanzi);
+    }
+    // The lesson lists every word the learner imported, merged ones included.
+    if (lesson) {
+      coll('lessons').update(lesson.id, { wordIds: ids });
+      lessonIds.push(lesson.id);
+    }
   }
-  // The lesson lists every word the learner imported, merged ones included.
-  if (lesson) lesson = coll('lessons').update(lesson.id, { wordIds });
 
   coll('notes').update(note.id, {
     status: 'imported',
-    imported: { lessonId: lesson?.id || null, wordIds, mergedHanzi },
+    imported: { lessonId: lessonIds[0] || null, lessonIds, wordIds, mergedHanzi },
   });
+  if (note.source?.materialId) {
+    recordCoverage(note.source.materialId, { pages: note.source.pages, lessonIds, noteId: note.id });
+    await releaseIfUnkept(note.source.materialId);
+  }
 
-  const xp = 10;
+  const created = createdHere.size;
+  const xp = 10 * Math.max(1, lessonIds.length);
   addXp(xp, { kind: 'import' });
   bumpDay({ newWords: created });
-  res.json({ lessonId: lesson?.id || null, wordIds, mergedHanzi, created, xp, stats: getStats() });
+  res.json({ lessonIds, lessonId: lessonIds[0] || null, wordIds, mergedHanzi, created, xp, stats: getStats() });
 });
 
 export default r;

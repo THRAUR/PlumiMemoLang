@@ -23,11 +23,22 @@
 }
 .ch-type { padding: 2px 12px; border-bottom: var(--bw) solid var(--line); margin: 0; font-size: 15px; }
 .ch-type:last-child { border-bottom: 0; }
-.ch-type:hover { background: var(--surface-2); }
+@media (hover: hover) { .ch-type:hover { background: var(--surface-2); } }
 .ch-reading-toggle { align-items: flex-start; padding: 10px 12px; border: var(--bw) dashed var(--line-strong); border-radius: var(--r-md); }
 .ch-reading-toggle input { margin-top: 3px; }
 .ch-reading-toggle .grow { display: flex; flex-direction: column; gap: 2px; }
 .ch-hint-line { font-family: var(--font-label); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+
+/* The types that fit the learner's goals come first; the rest wait behind a
+   quiet "Show all types" (muted ink: the window's one terracotta is Start),
+   each tagged with who it is for. */
+.ch-win .ch-types-help { margin-top: 4px; }
+.ch-types-wrap { display: flex; flex-direction: column; align-items: stretch; }
+.ch-type .grow { min-width: 0; }
+.ch-type .pl-tag { margin-left: 8px; }
+/* A label that wraps to two lines must not squeeze its checkbox. */
+.ch-type input { flex: none; }
+.ch-more { align-self: flex-start; margin-top: 6px; margin-left: -8px; }
 
 /* ---------- building (the AI reading job) ---------- */
 .ch-build { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 48px 16px; text-align: center; }
@@ -39,9 +50,38 @@
 .ch-prompt .hz { text-align: center; word-break: break-word; }
 .ch-meaning { text-align: center; line-height: 1.35; }
 
+/* The English as the whole prompt (the speaking questions): large, but Karla,
+   because it is body copy and pixel type never sets body copy. */
+.ch-meaning-hero { font-size: 28px; line-height: 1.25; font-weight: 500; color: var(--text); text-align: center; overflow-wrap: anywhere; }
+.ch-context { font-size: 15px; line-height: 1.4; color: var(--muted); text-align: center; }
+/* "small" mode: the characters as a quiet footnote. */
+.ch-hanzi-note { font-family: var(--font-zh); font-size: 20px; line-height: 1.2; color: var(--muted); }
+
 /* Listening: the play button IS the question. */
 .ch-listen { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 2px; }
 .ch-listen .btn--icon.btn--lg { width: 96px; height: 96px; min-height: 96px; border-radius: var(--r-md); }
+.ch-listen .btn--sm { min-height: 44px; }
+
+/* Options that ARE readings (mc-pinyin, tones): large enough to read a tone
+   mark at arm's length, the other script quieter beside it. */
+.option--reading .ch-option-reading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; }
+.option--reading .reading { font-size: 21px; line-height: 1.3; color: var(--text); }
+.option--reading .ch-reading-second { font-size: 15px; color: var(--muted); }
+.ch-tone { letter-spacing: .02em; }
+
+/* A 667px-tall phone: a listening question (play button, letters, four
+   options) fits above the footer once the pad and the gaps tighten. */
+@media (max-height: 720px) {
+  .ch-q { gap: 12px; }
+  .ch-listen { padding-top: 2px; }
+  .ch-listen .btn--icon.btn--lg { width: 76px; height: 76px; min-height: 76px; }
+  .ch-q .options:not(.options--grid) .option { min-height: 50px; padding-top: 8px; padding-bottom: 8px; }
+}
+
+/* Tones: the bare letters under the play button, the meaning under them. */
+.ch-bare { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.ch-bare-text { font-size: 26px; color: var(--text); letter-spacing: .04em; overflow-wrap: anywhere; }
+.ch-bare-meaning { font-size: 14px; color: var(--muted); }
 
 /* Typing: one big field, its border turning sage or brick once checked. */
 .ch-input { font-family: var(--font-mono); }
@@ -56,12 +96,46 @@
 .ch-tile--l { font-size: 24px; font-family: var(--font-zh); }
 .ch-tile--r { font-size: 15px; font-family: var(--font-body); padding: 8px 10px; }
 .ch-tile:disabled { cursor: default; box-shadow: none; transform: none; }
+/* A speaking learner's left column holds readings, not characters. */
+.ch-tile--l.is-pinyin { font-family: var(--font-mono); font-size: 16px; font-weight: 700; padding: 8px 6px; overflow-wrap: anywhere; }
+.ch-tile--l.is-zhuyin { font-size: 17px; padding: 8px 6px; }
 
 /* Build the sentence: the answer line sits above its bank of characters. */
 .ch-order { display: flex; flex-direction: column; gap: 8px; }
 .ch-order .tile-answer.is-ok { border-bottom-color: var(--green); }
 .ch-order .tile-answer.is-bad { border-bottom-color: var(--error); }
 .ch-order .tile { font-family: var(--font-zh); }
+/* From syllables: pinyin in its mono face, 注音 in the CJK one. */
+.ch-order--pinyin .tile { font-family: var(--font-mono); font-size: 17px; padding: 8px 10px; }
+.ch-order--zhuyin .tile { font-size: 18px; }
+.ch-order-prompt { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ch-hear { min-height: 44px; }
+
+/* Say it: record and "Check me" in one wrapping row with the verdict on its own
+   line; the answer arrives under a dashed rule, the way a memo card turns over. */
+.ch-say-tools, .ch-reveal-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.ch-say-tools .rec, .ch-reveal-row .rec { flex: 0 1 auto; }
+/* speech.js draws its buttons small; here they are the main controls. */
+.ch-say-tools .btn, .ch-reveal-row .btn { min-height: 44px; padding: 10px 11px; gap: 7px; }
+.ch-heard {
+  flex: 1 1 100%;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 6px;
+  font-size: 14px; line-height: 1.35; color: var(--muted); text-align: center;
+}
+/* Green only when recognition heard the word: a verdict, so a STATE colour. */
+.ch-heard.is-ok { color: var(--green); }
+.ch-heard-zh { font-family: var(--font-zh); color: var(--text); }
+.ch-say-hint { text-align: center; font-size: 15px; color: var(--muted); }
+.ch-reveal {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding-top: 14px; border-top: var(--bw) dashed var(--line-strong);
+  animation: rise var(--dur-base) var(--ease-out) both;
+}
+/* Two judgements in one shrinkable row: on a phone a label wraps to two lines
+   rather than push the footer wider than the screen. */
+.ch-judge-row { flex: 1 1 auto; display: flex; gap: 8px; min-width: 0; }
+.ch-judge-row .btn { flex: 1 1 0; min-width: 0; padding: 8px; white-space: normal; line-height: 1.25; text-align: center; }
+@media (min-width: 640px) { .ch-judge-row { flex: 0 1 auto; } .ch-judge-row .btn { min-width: 180px; } }
 
 /* Fill the blank. */
 .ch-cloze { text-align: center; line-height: 1.5; word-break: break-word; }
@@ -84,6 +158,10 @@
 .ch-detail .hz { line-height: 1.35; }
 .ch-detail-meaning { font-size: 15px; color: var(--text); }
 .ch-detail-readings { gap: 8px; flex-wrap: wrap; }
+.ch-detail-readings--big .reading { font-size: 20px; color: var(--text); }
+.ch-detail .ch-hanzi-note { font-size: 16px; }
+.ch-detail--sentence { align-items: stretch; }
+.ch-detail--sentence .example { padding: 2px 10px; }
 
 /* ---------- session footer ---------- */
 .session-footer .ch-bird { flex: 0 0 auto; display: flex; align-items: center; }
@@ -108,6 +186,9 @@
    `transform: none` and would undo the centring. */
 .ch-end-hero .bubble { left: 50%; right: auto; top: auto; bottom: calc(100% + 6px); translate: -50% 0; min-width: 0; white-space: nowrap; }
 .ch-end-hero .bubble::before { left: 50%; margin-left: -3px; top: auto; bottom: -4px; border: 0; border-right: var(--bw) solid var(--line-strong); border-bottom: var(--bw) solid var(--line-strong); }
+/* The bubble hangs above Plumi (it lives in the bird's own box), which put it
+   over the window's title bar on a phone: the hero reserves that room. */
+.ch-end .ch-end-hero { padding-top: 46px; }
 .ch-end-actions { flex: 1 1 auto; display: flex; gap: 10px; min-width: 0; }
 .ch-end-actions .btn { flex: 1 1 auto; min-width: 0; padding: 10px 10px; }
 .ch-score { font-family: var(--font-display); font-size: 40px; font-weight: 700; line-height: 1; text-align: center; }
@@ -118,7 +199,10 @@
   .ch-end .score:nth-child(-n+2) { border-bottom: 0; }
 }
 .ch-recap .list-row { min-height: 40px; }
-.ch-recap .list-row:hover { background: transparent; }
+@media (hover: hover) { .ch-recap .list-row:hover { background: transparent; } }
 .ch-recap .is-ok .px { color: var(--green); }
 .ch-recap .is-bad .px { color: var(--error); }
 .ch-recap .is-bad { background: var(--error-dim); }
+/* A recap row: the word by the display rules, then its meaning, quieter. */
+.ch-recap-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.ch-recap-meaning { font-size: 14px; color: var(--muted); }

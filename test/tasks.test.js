@@ -1,6 +1,6 @@
 /* server/ai/tasks.js — no network: globalThis.fetch is stubbed with canned
    OpenRouter completions. The point of these tests is the layer around the
-   model: routing, the human no-key error, normalisation (readings, dedupe,
+   model: the model chain and its fallback, the human no-key error, normalisation (readings, dedupe,
    isKnown, caps) and one usage row per call, success or failure. */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ process.env.MEMOLANG_DATA_DIR = TMP;
 process.env.DATA_DIR = TMP;
 delete process.env.OPENROUTER_API_KEY;        // so resolveApiKey() has only settings
 
-const { TASKS, TASK_IDS, resolveModel, resolveApiKey, hasApiKey, runTask } = await import('../server/ai/tasks.js');
+const { TASKS, TASK_IDS, resolveChain, resolveModel, resolveApiKey, hasApiKey, runTask } = await import('../server/ai/tasks.js');
 const { coll, doc, flushAll } = await import('../server/store.js');
 const { pinyinToZhuyin, zhuyinToPinyin } = await import('../shared/zhuyin.js');
 
@@ -22,13 +22,20 @@ const cache = doc('models-cache', {});
 const realFetch = globalThis.fetch;
 const KEY = 'sk-or-v1-abcdef1234';
 
-// chat() reads this cache to decide how to ask for JSON; warm it so the
-// extract call takes the json_schema path.
+const G35 = 'google/gemini-3.5-flash-lite';
+const G31 = 'google/gemini-3.1-flash-lite';
+const DS = 'deepseek/deepseek-v4-flash';
+const G25 = 'google/gemini-2.5-flash-lite';
+
+// chat() reads this cache to decide how to ask for JSON. Gemini 3.5 is marked as
+// supporting structured outputs so extract takes the json_schema path, and
+// DeepSeek only does json_object. The real catalog differs; these tests are
+// about the request each path builds, not about the catalog.
 cache.set(() => ({
   fetchedAt: new Date().toISOString(),
   models: [
-    { id: 'test/extract', name: 'Extractor', pricing: { prompt: 0.000003, completion: 0.000015, image: 0 }, supportsStructured: true, supportsJson: true, inputModalities: ['text', 'image'], contextLength: 200000, created: 0 },
-    { id: 'test/default', name: 'Default', pricing: { prompt: 0.000001, completion: 0.000002, image: 0 }, supportsStructured: false, supportsJson: true, inputModalities: ['text'], contextLength: 128000, created: 0 },
+    { id: G35, name: 'Google: Gemini 3.5 Flash Lite', pricing: { prompt: 0.0000003, completion: 0.0000025, image: 0 }, supportsStructured: true, supportsJson: true, inputModalities: ['text', 'image'], contextLength: 1048576, created: 0 },
+    { id: DS, name: 'DeepSeek: DeepSeek V4 Flash 0423', pricing: { prompt: 0.000000048, completion: 0.000000095, image: 0 }, supportsStructured: false, supportsJson: true, inputModalities: ['text'], contextLength: 1048576, created: 0 },
   ],
 }));
 
@@ -38,7 +45,8 @@ const SETTINGS = {
   nativeLanguage: 'fr',
   level: 'intermediate',
   script: 'zhuyin',
-  ai: { apiKey: KEY, models: { default: 'test/default', extract: 'test/extract' } },
+  // DeepSeek on top: a text task starts there, and a photo task shows the skip.
+  ai: { apiKey: KEY, priority: [DS, G35, G31, G25] },
 };
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
@@ -62,7 +70,7 @@ function stubFetch(t, steps) {
   return calls;
 }
 
-function completion(payload, { model = 'test/extract', cost = 0.0042 } = {}) {
+function completion(payload, { model = G35, cost = 0.0042 } = {}) {
   return {
     status: 200,
     body: {
@@ -93,12 +101,19 @@ test('TASKS covers every task with an importance and a reason', () => {
   assert.match(TASKS.extract.why, /learned/);
 });
 
-test('resolveModel routes per task and falls back to the default', () => {
-  assert.equal(resolveModel(SETTINGS, 'extract'), 'test/extract');
-  assert.equal(resolveModel(SETTINGS, 'suggest'), 'test/default', 'an empty per-task model means "use the default"');
-  assert.equal(resolveModel(SETTINGS, 'test'), 'test/default', 'the connection test has no model of its own');
-  assert.equal(resolveModel({}, 'extract'), 'anthropic/claude-sonnet-4.5', 'the shipped default');
-  assert.equal(resolveModel(undefined, 'extract'), 'anthropic/claude-sonnet-4.5');
+test('resolveChain walks the priority list, skips text-only models for photos, and stays on the allow-list', () => {
+  assert.deepEqual(resolveChain(SETTINGS), [DS, G35, G31, G25]);
+  assert.deepEqual(resolveChain(SETTINGS, { images: true }), [G35, G31, G25], 'DeepSeek cannot read photos');
+  assert.deepEqual(resolveChain(SETTINGS, { prefer: G25 }), [G25, DS, G35, G31], 'a one-off pick goes first; the rest stays behind it');
+  assert.deepEqual(
+    resolveChain({ ai: { priority: ['anthropic/claude-sonnet-4.5', G31] } }),
+    [G31, G35, DS, G25],
+    'an id off the list is dropped, and the missing allowed models are appended',
+  );
+  assert.deepEqual(resolveChain({}), [G35, G31, DS, G25], 'the recommended order');
+  assert.equal(resolveModel(SETTINGS, 'suggest'), DS);
+  assert.equal(resolveModel(SETTINGS, 'extract', { images: true }), G35);
+  assert.equal(resolveModel(undefined, 'extract'), G35, 'no settings at all still lands on an allowed model');
 });
 
 test('resolveApiKey prefers the learner\'s key and says where to paste one', () => {
@@ -178,7 +193,7 @@ test('runTask extract builds the request the contract asks for', async (t) => {
   assert.equal(headers.Authorization, `Bearer ${KEY}`);
   assert.ok(!rawBody.includes(KEY), 'the key is a header, never part of the prompt');
 
-  assert.equal(body.model, 'test/extract', 'extract uses its own model');
+  assert.equal(body.model, G35, 'photos skip DeepSeek, the text-only model at the top of the list');
   assert.equal(body.temperature, 0.2);
   assert.deepEqual(body.usage, { include: true });
   assert.equal(body.response_format.type, 'json_schema', 'the cached model supports structured outputs');
@@ -186,8 +201,9 @@ test('runTask extract builds the request the contract asks for', async (t) => {
   assert.equal(body.response_format.json_schema.strict, true);
   const schema = body.response_format.json_schema.schema;
   assert.equal(schema.additionalProperties, false);
-  assert.deepEqual(schema.required, ['lesson', 'words']);
-  assert.deepEqual(schema.properties.words.items.required, [
+  assert.deepEqual(schema.required, ['lessons'], 'one source can become several lessons');
+  assert.deepEqual(schema.properties.lessons.items.required, ['lesson', 'words']);
+  assert.deepEqual(schema.properties.lessons.items.properties.words.items.required, [
     'hanzi', 'pinyin', 'zhuyin', 'meaning', 'meaningNative', 'pos', 'type', 'examples', 'notes', 'tags', 'isKnown',
   ]);
 
@@ -224,27 +240,31 @@ test('runTask extract normalises what comes back', async (t) => {
   stubFetch(t, completion(EXTRACT_ANSWER));
   const before = usage.all().length;
   const { result, usage: reported, model } = await runTask('extract', EXTRACT_INPUT, { settings: SETTINGS });
+  // EXTRACT_ANSWER is the old single-lesson shape: a model that answers it still
+  // gives one usable lesson.
+  assert.equal(result.lessons.length, 1);
+  const draft = result.lessons[0];
 
   // ── lesson
-  assert.equal(result.lesson.title, 'Ordering food', 'trimmed');
-  assert.equal(result.lesson.titleZh, '點餐');
-  assert.equal(result.lesson.summary, 'What to say in a restaurant.');
-  assert.equal(result.lesson.sections.length, 2, 'the empty section is dropped');
-  assert.equal(result.lesson.sections[0].body, '- 點餐\n- 買單', 'an array body is flattened to text');
-  assert.equal(result.lesson.sections[1].kind, 'text', 'an unknown kind falls back to text');
-  assert.equal(result.lesson.grammar.length, 1);
-  assert.equal(result.lesson.grammar[0].pattern, '要 + noun');
-  assert.equal(result.lesson.grammar[0].examples.length, 3, 'examples are capped at 3');
-  assert.equal(result.lesson.dialogue.length, 1);
-  assert.equal(result.lesson.dialogue[0].speaker, 'A', 'a missing speaker is filled in');
+  assert.equal(draft.lesson.title, 'Ordering food', 'trimmed');
+  assert.equal(draft.lesson.titleZh, '點餐');
+  assert.equal(draft.lesson.summary, 'What to say in a restaurant.');
+  assert.equal(draft.lesson.sections.length, 2, 'the empty section is dropped');
+  assert.equal(draft.lesson.sections[0].body, '- 點餐\n- 買單', 'an array body is flattened to text');
+  assert.equal(draft.lesson.sections[1].kind, 'text', 'an unknown kind falls back to text');
+  assert.equal(draft.lesson.grammar.length, 1);
+  assert.equal(draft.lesson.grammar[0].pattern, '要 + noun');
+  assert.equal(draft.lesson.grammar[0].examples.length, 3, 'examples are capped at 3');
+  assert.equal(draft.lesson.dialogue.length, 1);
+  assert.equal(draft.lesson.dialogue[0].speaker, 'A', 'a missing speaker is filled in');
 
   // ── words
-  assert.deepEqual(result.words.map((w) => w.hanzi), ['謝謝', '你好', '點餐']);
-  assert.deepEqual(Object.keys(result.words[0]), [
+  assert.deepEqual(draft.words.map((w) => w.hanzi), ['謝謝', '你好', '點餐']);
+  assert.deepEqual(Object.keys(draft.words[0]), [
     'hanzi', 'pinyin', 'zhuyin', 'meaning', 'meaningNative', 'pos', 'type', 'examples', 'notes', 'tags', 'isKnown',
   ], 'exactly the WordDraft keys, nothing the model invented');
 
-  const [xiexie, nihao, diancan] = result.words;
+  const [xiexie, nihao, diancan] = draft.words;
   assert.equal(xiexie.meaning, 'thank you');
   assert.equal(xiexie.meaningNative, 'merci', 'kept: the learner is not working in English');
   assert.equal(xiexie.notes, 'very common', 'the duplicate filled in what the first entry was missing');
@@ -262,15 +282,15 @@ test('runTask extract normalises what comes back', async (t) => {
   assert.equal(xiexie.zhuyin, pinyinToZhuyin('xiè xie'), 'zhuyin comes from the pinyin');
   assert.equal(diancan.pinyin, zhuyinToPinyin('ㄉㄧㄢˇ ㄘㄢ'), 'and pinyin from the zhuyin');
   assert.equal(typeof xiexie.zhuyin, 'string');
-  assert.equal(result.lesson.dialogue[0].zhuyin, pinyinToZhuyin('nǐ yào shén me'));
+  assert.equal(draft.lesson.dialogue[0].zhuyin, pinyinToZhuyin('nǐ yào shén me'));
 
   // ── accounting
-  assert.equal(model, 'test/extract');
+  assert.equal(model, G35);
   assert.deepEqual(reported, { promptTokens: 900, completionTokens: 300, totalTokens: 1200, cost: 0.0042 });
   const rows = usageSince(before);
   assert.equal(rows.length, 1, 'exactly one usage row per call');
   assert.equal(rows[0].task, 'extract');
-  assert.equal(rows[0].model, 'test/extract');
+  assert.equal(rows[0].model, G35);
   assert.equal(rows[0].promptTokens, 900);
   assert.equal(rows[0].completionTokens, 300);
   assert.equal(rows[0].cost, 0.0042, 'the cost OpenRouter reported, not an estimate');
@@ -297,23 +317,109 @@ test('runTask logs the failure too, with a human message', async (t) => {
   assert.equal(rows[0].error, 'Your OpenRouter account is out of credits.');
   assert.equal(rows[0].cost, 0, 'always a number, so /api/usage can sum the column');
   assert.equal(rows[0].task, 'extract');
+  assert.equal(rows[0].model, G35, 'an empty balance is empty for every model, so nothing else was tried');
 });
 
-test('runTask says so when the model returns the wrong shape', async (t) => {
+test('runTask moves down the list when a model fails, and says so', async (t) => {
+  const calls = stubFetch(t, [
+    { status: 503, body: { error: { message: 'provider down', code: 503 } } },
+    completion({ answer: 'Say it to thank anyone.' }, { model: G35 }),
+  ]);
+  const progress = [];
+  const before = usage.all().length;
+  const out = await runTask('explain', { word: { hanzi: '謝謝' }, question: 'When?' }, { settings: SETTINGS, onProgress: (p) => progress.push(p) });
+
+  assert.deepEqual(calls.map((c) => c.body.model), [DS, G35], 'the second model on the list took over');
+  assert.equal(out.model, G35);
+  assert.deepEqual(out.result, { answer: 'Say it to thank anyone.' });
+  assert.deepEqual(out.fallbacks.map((f) => f.model), [DS]);
+  assert.match(out.fallbacks[0].error, /status 503/);
+  assert.ok(progress.includes('DeepSeek V4 Flash 0423 failed. Trying Gemini 3.5 Flash Lite…'), 'the job says what is happening');
+  assert.deepEqual(usageSince(before).map((r) => [r.model, r.ok]), [[DS, false], [G35, true]], 'one usage row per attempt');
+});
+
+test('runTask stops at once when every model would fail the same way', async (t) => {
+  const calls = stubFetch(t, { status: 401, body: { error: { message: 'No auth credentials found', code: 401 } } });
+  const before = usage.all().length;
+  await assert.rejects(
+    () => runTask('explain', { word: { hanzi: '謝謝' } }, { settings: SETTINGS }),
+    /rejected the API key/,
+  );
+  assert.equal(calls.length, 1, 'a bad key is bad for every model: one call, not four');
+  assert.equal(usageSince(before).length, 1);
+});
+
+test('runTask with `only` tries exactly one model, and refuses models off the list', async (t) => {
+  const calls = stubFetch(t, { status: 404, body: { error: { message: 'Not found', code: 404 } } });
+  await assert.rejects(() => runTask('test', {}, { settings: SETTINGS, prefer: G31, only: true }), /not found/);
+  assert.deepEqual(calls.map((c) => c.body.model), [G31], 'a model under test gets no backup');
+  await assert.rejects(
+    () => runTask('test', {}, { settings: SETTINGS, prefer: 'anthropic/claude-sonnet-4.5' }),
+    /not on the allowed model list/,
+  );
+  assert.equal(calls.length, 1, 'a model off the list never reaches OpenRouter');
+});
+
+test('runTask names every model it tried when they all fail', async (t) => {
   stubFetch(t, completion({ foo: 1 }));
   const before = usage.all().length;
   await assert.rejects(
     () => runTask('extract', EXTRACT_INPUT, { settings: SETTINGS }),
     (e) => {
-      assert.match(e.message, /did not return a lesson/);
-      assert.match(e.message, /Notes → lesson/, 'the message names the task to re-route in Settings');
+      assert.match(e.message, /^Every model on your list failed \(Gemini 3\.5 Flash Lite, Gemini 3\.1 Flash Lite, Gemini 2\.5 Flash Lite\)\./);
+      assert.match(e.message, /did not return any lessons/, 'and keeps the last reason');
       return true;
     },
   );
   const rows = usageSince(before);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].ok, false, 'the tokens were still spent');
-  assert.equal(rows[0].promptTokens, 900);
+  assert.deepEqual(rows.map((r) => r.model), [G35, G31, G25], 'photo notes never touch the text-only model');
+  assert.ok(rows.every((r) => r.ok === false && r.promptTokens === 900), 'every attempt spent tokens and is logged');
+});
+
+test('runTask extract turns one source into several lessons and follows the split rule', async (t) => {
+  const two = {
+    lessons: [
+      {
+        lesson: { title: 'At the café', titleZh: '在咖啡店', summary: 'Ordering coffee.', sections: [{ kind: 'dialogue', title: 'Dialogue', body: 'A: 你好' }], grammar: [], dialogue: [] },
+        words: [{ hanzi: '咖啡', pinyin: 'kā fēi', meaning: 'coffee' }, { hanzi: '糖', pinyin: 'táng', meaning: 'sugar' }],
+      },
+      {
+        lesson: { title: '', titleZh: '問路', summary: 'Asking the way.', sections: [{ kind: 'vocab', title: 'Words', body: '- 右轉' }], grammar: [], dialogue: [] },
+        words: [{ hanzi: '右轉', pinyin: 'yòu zhuǎn', meaning: 'turn right' }],
+      },
+    ],
+  };
+  const calls = stubFetch(t, [completion(two), completion(two)]);
+  const doc = {
+    title: 'Book',
+    split: 'per-range',
+    pages: [{ pdf: 3, printed: 2 }, { pdf: 4, printed: 3 }, { pdf: 6, printed: 5 }],
+    instructions: 'Skip the exercises.',
+    source: { title: 'Taiwan Mandarin' },
+    images: [{ dataUrl: 'data:image/jpeg;base64,AAAA' }],
+    knownHanzi: [],
+  };
+  const speaking = { ...SETTINGS, goals: { skills: ['speak', 'listen'], reasons: ['taiwan'], about: 'Classes with Carl.', onboardedAt: '2026-09-13T20:00:00Z' } };
+  const { result } = await runTask('extract', doc, { settings: speaking });
+  assert.equal(result.lessons.length, 2);
+  assert.equal(result.lessons[1].lesson.title, 'Book · 2', 'a lesson without a title is numbered');
+  assert.deepEqual(result.lessons[1].words.map((w) => w.hanzi), ['右轉']);
+
+  const [system, user] = calls[0].body.messages;
+  assert.match(system.content, /FOCUS: SPEAKING AND LISTENING/, 'the goals reach the model');
+  assert.match(system.content, /Classes with Carl/);
+  const text = user.content[0].text;
+  assert.match(text, /lesson 1 = pages 2–3; lesson 2 = page 5/, 'one lesson per page range, in printed numbers');
+  assert.match(text, /page 2 \(PDF page 3\)/);
+  assert.match(text, /Skip the exercises/);
+  assert.match(text, /learning to SPEAK/);
+
+  // The learner asked for ONE lesson: the same answer is folded into one.
+  const one = await runTask('extract', { ...doc, split: 'one' }, { settings: SETTINGS });
+  assert.equal(one.result.lessons.length, 1);
+  assert.deepEqual(one.result.lessons[0].words.map((w) => w.hanzi), ['咖啡', '糖', '右轉']);
+  assert.equal(one.result.lessons[0].lesson.title, 'At the café');
+  assert.equal(one.result.lessons[0].lesson.sections.length, 2);
 });
 
 /* ── suggest ─────────────────────────────────────────────────────────────── */
@@ -327,7 +433,7 @@ test('runTask suggest drops known words, dedupes, and sends only hanzi', async (
       { hanzi: '晚安', pinyin: 'wǎn ān', meaning: 'good night', why: 'The other half of the day.', example: EXAMPLE('晚安。') },
       { hanzi: '再見', pinyin: 'zài jiàn', meaning: 'goodbye', why: 'Too many.', example: EXAMPLE('再見。') },
     ],
-  }, { model: 'test/default' }));
+  }, { model: DS }));
 
   const { result, model } = await runTask('suggest', {
     known: ['你好', '謝謝'],
@@ -337,7 +443,7 @@ test('runTask suggest drops known words, dedupes, and sends only hanzi', async (
     nativeLanguage: 'en',
   }, { settings: SETTINGS });
 
-  assert.equal(model, 'test/default', 'suggest has no model of its own, so it uses the default');
+  assert.equal(model, DS, 'a text task starts at the top of the list');
   assert.deepEqual(calls[0].body.response_format, { type: 'json_object' }, 'that model only does json_object');
   assert.equal(calls[0].body.temperature, 0.7);
 
@@ -371,7 +477,7 @@ test('runTask reading keeps only answerable questions and sends hanzi + meaning'
       { q: '', options: ['a', 'b', 'c', 'd'], answerIndex: 0 },
       { q: 'Answer as a string', options: ['a', 'b', 'c', 'd'], answerIndex: '2' },
     ],
-  }, { model: 'test/default' }));
+  }, { model: DS }));
 
   const { result } = await runTask('reading', {
     words: [{ hanzi: '市場', meaning: 'market', pinyin: 'shì chǎng', zhuyin: 'ㄕˋ ㄔㄤˇ', srs: { state: 'new' }, stats: { reviews: 0 } }],
@@ -392,12 +498,12 @@ test('runTask reading keeps only answerable questions and sends hanzi + meaning'
 
 test('runTask explain and enrich come back in the contract shape', async (t) => {
   stubFetch(t, [
-    completion({ answer: '  **謝謝** is the everyday thank-you.  ' }, { model: 'test/default' }),
+    completion({ answer: '  **謝謝** is the everyday thank-you.  ' }, { model: DS }),
     completion({
       pinyin: ' xiè xie ', meaning: ' thank you ', meaningNative: ' merci ', pos: 'v', type: 'word',
       examples: [EXAMPLE('謝謝你。'), EXAMPLE('謝謝!'), EXAMPLE('謝謝大家。'), EXAMPLE('太謝謝了。')],
       notes: ' Neutral tone on the second syllable. ', extra: 'ignored',
-    }, { model: 'test/default' }),
+    }, { model: DS }),
   ]);
 
   const explain = await runTask('explain', { word: { hanzi: '謝謝', pinyin: 'xiè xie' }, question: 'When do I use it?' }, { settings: SETTINGS });
@@ -412,7 +518,7 @@ test('runTask explain and enrich come back in the contract shape', async (t) => 
 });
 
 test('runTask test answers in plain text, no JSON required', async (t) => {
-  const calls = stubFetch(t, completion('你好!歡迎回來。(nǐ hǎo! huān yíng huí lái.)', { model: 'test/default' }));
+  const calls = stubFetch(t, completion('你好!歡迎回來。(nǐ hǎo! huān yíng huí lái.)', { model: DS }));
   const before = usage.all().length;
   const { result, usage: reported } = await runTask('test', {}, { settings: SETTINGS });
 
@@ -425,9 +531,9 @@ test('runTask test answers in plain text, no JSON required', async (t) => {
 
 test('runTask falls back to the stored settings document', async (t) => {
   // A job can outlive the request that started it; settings must still resolve.
-  doc('settings', {}).set(() => ({ ai: { apiKey: KEY, models: { default: 'stored/model' } } }));
-  const calls = stubFetch(t, completion('嗨!(hāi!)', { model: 'stored/model' }));
+  doc('settings', {}).set(() => ({ ai: { apiKey: KEY, priority: [G25] } }));
+  const calls = stubFetch(t, completion('嗨!(hāi!)', { model: G25 }));
   const { result } = await runTask('test', {}, {});
-  assert.equal(calls[0].body.model, 'stored/model');
+  assert.equal(calls[0].body.model, G25, 'the stored order, completed with the rest of the list');
   assert.equal(result.reply, '嗨!(hāi!)');
 });

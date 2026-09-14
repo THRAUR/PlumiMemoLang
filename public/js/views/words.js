@@ -10,11 +10,13 @@ import { api } from '../api.js';
 import { settings } from '../state.js';
 import { navigate } from '../router.js';
 import { createBird } from '../bird.js';
-import { hanziEl, readingLine } from '../hanzi.js';
+import { wordHero, wordLine, exampleEl as hzExampleEl } from '../hanzi.js';
 import { pinyinToZhuyin } from '/shared/zhuyin.js';
+import { recognition, recordControl, listenOnce, hanziMatch } from '../speech.js';
 import {
   h, toast, openWindow, confirmWindow, emptyState, busy, meter, bandChip,
-  pixelIcon, fmt, readingEl, speakButton, markdownish, setTitle,
+  pixelIcon, fmt, readingEl, speakButton, markdownish, setTitle, hanziMode,
+  readingFor,
 } from '../ui.js';
 
 /* ---------- lookups ---------- */
@@ -51,11 +53,16 @@ function debounce(fn, ms) {
 /* A generation counter: every async chain checks it before touching the DOM,
    so a fast navigation away never paints into a screen the router replaced. */
 let gen = 0;
+let activeRec = null;   // the detail screen's recordControl, so unmount() can release the mic
 
 /* ---------- the add/edit window, shared by the index, the detail actions,
    and (via a preset lessonId) anyone who wants to add straight into a lesson ---------- */
 function openWordWindow({ word = null, lessonId = null, lessons = [], onSaved = null } = {}) {
   const isEdit = !!word;
+  // A speaking learner's notes lead with pinyin and English; characters are only
+  // kept to confirm the original meaning (docs/ARCHITECTURE.md §8), so the form
+  // mirrors that order for them and leaves the characters field for last.
+  const speaking = hanziMode() !== 'full';
   const hanziInput = h('input', { class: 'input zh', value: word?.hanzi || '', placeholder: '謝謝' });
   const pinyinInput = h('input', { class: 'input', value: word?.pinyin || '', placeholder: 'xiè xie' });
   const zhuyinInput = h('input', { class: 'input zh', value: word?.zhuyin || '', placeholder: 'ㄒㄧㄝˋ ˙ㄒㄧㄝ' });
@@ -82,20 +89,25 @@ function openWordWindow({ word = null, lessonId = null, lessons = [], onSaved = 
 
   const field = (label, input, help) => h('label', { class: 'field' }, h('span', { class: 'label' }, label), input, help ? h('span', { class: 'help' }, help) : null);
 
+  const hanziField = field('Hanzi', hanziInput, speaking ? 'Characters are kept as a reference' : null);
+  const readingRow = h('div', { class: 'grid-2' }, field('Pinyin', pinyinInput), field('Zhuyin', zhuyinInput));
+  const exampleZhField = field('Example (Chinese)', exZh);
+  const exampleReadingRow = h('div', { class: 'grid-2' }, field('Example pinyin', exPinyin), field('Example translation', exTr));
+  const middleFields = [
+    field('Meaning', meaningInput),
+    field(`Meaning in ${nativeLabel()}`, meaningNativeInput),
+    h('div', { class: 'grid-2' }, field('Part of speech', posSelect), field('Type', typeSelect)),
+    lessonSelect ? field('Lesson', lessonSelect) : null,
+    field('Tags', tagsInput, 'Comma separated'),
+    field('Notes', notesInput),
+  ];
+  const bodyFields = speaking
+    ? [readingRow, ...middleFields, h('p', { class: 'pl-eyebrow' }, 'Example'), exampleReadingRow, exampleZhField, hanziField]
+    : [hanziField, readingRow, ...middleFields, h('p', { class: 'pl-eyebrow' }, 'Example'), exampleZhField, exampleReadingRow];
+
   openWindow({
     title: isEdit ? 'Edit word' : 'Add word',
-    body: h('div', { class: 'stack wd-form' },
-      field('Hanzi', hanziInput),
-      h('div', { class: 'grid-2' }, field('Pinyin', pinyinInput), field('Zhuyin', zhuyinInput)),
-      field('Meaning', meaningInput),
-      field(`Meaning in ${nativeLabel()}`, meaningNativeInput),
-      h('div', { class: 'grid-2' }, field('Part of speech', posSelect), field('Type', typeSelect)),
-      lessonSelect ? field('Lesson', lessonSelect) : null,
-      field('Tags', tagsInput, 'Comma separated'),
-      field('Notes', notesInput),
-      h('p', { class: 'pl-eyebrow' }, 'Example'),
-      field('Example (Chinese)', exZh),
-      h('div', { class: 'grid-2' }, field('Example pinyin', exPinyin), field('Example translation', exTr))),
+    body: h('div', { class: 'stack wd-form' }, ...bodyFields),
     actions: [
       { label: 'Cancel' },
       {
@@ -131,16 +143,20 @@ function openWordWindow({ word = null, lessonId = null, lessons = [], onSaved = 
   });
 }
 
+/* hanzi.js's exampleEl() draws the sentence by the learner's display rules
+   (§8.3, reading first and large in speaking focus) but has no speak option,
+   so the button rides alongside in its own row. */
 function exampleEl(ex) {
-  return h('div', { class: 'example' },
-    h('div', { class: 'row' }, h('div', { class: 'zh grow', lang: 'zh-Hant' }, ex.zh || ''), speakButton(ex.zh || '', { size: 'sm' })),
-    readingEl(ex),
-    ex.translation ? h('div', { class: 'tr' }, ex.translation) : null);
+  const body = hzExampleEl(ex);
+  if (!body) return null;
+  return h('div', { class: 'row wd-example-row' }, h('div', { class: 'grow' }, body), speakButton(ex.zh || '', { size: 'sm', label: 'Play the sentence' }));
 }
 
 /* ---------- index (#/words) ---------- */
 function wordRow(w) {
-  const line1 = h('div', { class: 'wd-row-l1' }, hanziEl(w, { size: 'md', reading: 'none' }), readingLine(w));
+  // wordLine() leads with the reading and shrinks the characters for a speaking
+  // learner (§8.3); a character learner gets characters with the reading beside them.
+  const line1 = h('div', { class: 'wd-row-l1' }, wordLine(w));
   const line2 = h('div', { class: 'wd-row-l2' }, h('span', { class: 'muted ellipsis wd-row-meaning' }, w.meaning || ''), meter(w.score || 0));
   const chip = bandChip(w.band);
   if (chip) { chip.classList.add('wd-row-chip'); line2.append(chip); }
@@ -167,7 +183,7 @@ async function renderIndex(root) {
   const addBtn = h('button', { class: 'btn btn--primary', type: 'button' }, pixelIcon('plus', 2), 'Add word');
   const head = h('div', { class: 'row row--wrap wd-head' }, h('div', { class: 'row wd-head-title' }, h('h1', null, 'Words'), countPill), addBtn);
 
-  const searchInput = h('input', { class: 'input', type: 'search', value: filters.q, placeholder: 'Search words', 'aria-label': 'Search words' });
+  const searchInput = h('input', { class: 'input', type: 'search', value: filters.q, placeholder: 'Search pinyin, English or characters', 'aria-label': 'Search words' });
   const searchBox = h('div', { class: 'search' }, pixelIcon('search', 2), searchInput);
 
   const segButtons = SORTS.map(([val, label]) => { const b = h('button', { type: 'button' }, label); b.dataset.val = val; return b; });
@@ -295,6 +311,43 @@ function openAskWindow(word) {
   });
 }
 
+/* "Practice saying it" (§8.4): hear the model, record your own attempt, and,
+   where the browser can listen, get an instant check against the characters.
+   recordControl() hides itself when there is no mic/secure context; the
+   Check-me button only appears when the browser has speech recognition. */
+function practiceBlock(word) {
+  const card = h('div', { class: 'card wd-practice' },
+    h('p', { class: 'pl-eyebrow' }, 'Practice saying it'),
+    h('div', { class: 'row wd-practice-row' },
+      speakButton(word.hanzi, { size: 'sm', label: 'Play the word' }),
+      h('span', { class: 'small muted' }, 'Listen, then record yourself saying it.')));
+
+  activeRec?.destroy();
+  const rec = recordControl({ label: 'Record yourself' });
+  activeRec = rec;
+  card.append(rec.el);
+
+  if (recognition.supported) {
+    const checkBtn = h('button', { class: 'btn btn--sm', type: 'button' }, pixelIcon('check', 2), 'Check me');
+    const result = h('div', { class: 'wd-practice-result', hidden: true });
+    checkBtn.addEventListener('click', async () => {
+      busy(checkBtn, true);
+      result.hidden = true;
+      try {
+        const heard = await listenOnce({ lang: 'zh-TW' });
+        const ok = hanziMatch(heard.text, word.hanzi || '') >= 0.8;
+        result.hidden = false;
+        result.replaceChildren(ok
+          ? h('p', { class: 'wd-practice-ok' }, pixelIcon('check', 2), 'Plumi heard it right.')
+          : h('div', null, h('p', { class: 'small muted' }, 'Plumi heard:'), h('p', { class: 'zh wd-practice-heard', lang: 'zh-Hant' }, heard.text || '—')));
+      } catch (e) { toast(e.message, 'bad'); }
+      finally { busy(checkBtn, false); }
+    });
+    card.append(h('div', { class: 'stack wd-practice-check' }, checkBtn, result));
+  }
+  return card;
+}
+
 async function renderDetail(root, id) {
   const myGen = ++gen;
   setTitle('Words');
@@ -310,7 +363,8 @@ async function renderDetail(root, id) {
     return;
   }
   if (myGen !== gen) return;
-  setTitle(word.hanzi || 'Words');
+  // A speaking learner reads the word by its sound; the characters stay a footnote.
+  setTitle(hanziMode() === 'full' ? (word.hanzi || 'Words') : (readingFor(word).primary?.text || word.hanzi || 'Words'));
   paintDetail(root, word, myGen);
 }
 
@@ -318,10 +372,13 @@ function paintDetail(root, word, myGen) {
   const reload = () => renderDetail(root, word.id);
   const backLink = h('a', { class: 'btn btn--sm btn--quiet wd-back', href: '#/words' }, pixelIcon('back', 2), 'Words');
 
+  // wordHero follows the learner's display mode (§8.3): full ruby hanzi for a
+  // character learner, a big reading with small characters for a speaking one.
+  // readingEl below it always spells out both scripts, whichever mode is showing.
   const heroReading = readingEl(word, { both: true, size: 'lg' });
   if (heroReading) heroReading.classList.add('wd-hero-reading');
   const hero = h('div', { class: 'wd-hero' },
-    h('div', { class: 'row wd-hero-hz' }, hanziEl(word, { size: 'xl' }), speakButton(word.hanzi, { size: 'lg' })),
+    h('div', { class: 'row wd-hero-hz' }, wordHero(word, { size: 'xl' }), speakButton(word.hanzi, { size: 'lg' })),
     heroReading);
 
   const meaningBlock = h('div', { class: 'wd-meaning' },
@@ -385,7 +442,7 @@ function paintDetail(root, word, myGen) {
   const win = h('div', { class: 'pl-win wd-detail-win' },
     h('div', { class: 'pl-titlebar' }, h('span', { class: 'pl-title' }, bandChip(word.band)), h('span', { class: 'spacer' })),
     h('div', { class: 'win-body' },
-      hero, meaningBlock, tagsRow, memoryCard,
+      hero, meaningBlock, tagsRow, practiceBlock(word), memoryCard,
       examples.length ? h('p', { class: 'pl-eyebrow' }, 'Examples') : null,
       ...examples,
       notesBlock,
@@ -403,5 +460,5 @@ export default {
     if (params?.id) await renderDetail(root, params.id);
     else await renderIndex(root);
   },
-  unmount() { gen++; },
+  unmount() { gen++; activeRec?.destroy(); activeRec = null; },
 };

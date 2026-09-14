@@ -7,20 +7,25 @@
    written by another module, so a missing or broken one must never blank the
    page. Whatever answered gets rendered, the rest degrades to a clean state.
 
+   The copy follows the learner's goals (profile() in ui.js): a speaking learner
+   is coached about saying and hearing, a character learner about characters,
+   and every Chinese word or phrase follows the display rules of §8.3.
+
    Accent budget (Plume's one-terracotta-per-region rule):
      · hero              → the goal ring
-     · "Today" window    → the Review row's icon box, when cards are waiting
+     · "Today" window    → the practice row's icon box, when there is something to practice
      · suggestions       → the "Add" buttons (or "Suggest words" when empty)
      · path              → the current node
      · scoreboard        → the best-streak number
      · this week         → today's spark bar
 */
-import { h, toast, ring, meter, emptyState, busy, celebrate, progress, speakButton, pixelIcon, fmt, setTitle } from '../ui.js';
+import { h, toast, ring, meter, emptyState, busy, celebrate, progress, speakButton, pixelIcon, fmt, setTitle, profile, readingFor } from '../ui.js';
 import { settings, stats, setStats, refreshStats, on } from '../state.js';
 import { api } from '../api.js';
 import { navigate } from '../router.js';
 import { createBird, greeting } from '../bird.js';
-import { hanziEl } from '../hanzi.js';
+import { wordLine } from '../hanzi.js';
+import { pinyinToZhuyin } from '/shared/zhuyin.js';
 
 /* ---------- view-local state ---------- */
 /* `seq` is a render token. Every await compares it before touching the DOM, so
@@ -36,16 +41,19 @@ let flashTimer = null;
 let restoreMood = null;     // the mood to go back to after a tap-on-Plumi line
 let goalWas = false;        // to fire the confetti only when the goal is newly met
 
-/* Six encouragements, half Chinese, half English — the Chinese half carries
-   lang="zh-Hant" so it renders in the CJK face, never in Karla's fallback. */
+/* Six encouragements, half Chinese, half English. Each Chinese line carries its
+   pinyin, because a speaking learner reads the reading, not the characters. */
 const SAYINGS = [
-  { zh: '加油！', en: 'You have got this.' },
-  { zh: '一天一點。', en: 'A little every day.' },
-  { zh: '慢慢來。', en: 'Slow is fine — just keep going.' },
-  { zh: '再來五分鐘。', en: 'Five minutes beats zero minutes.' },
+  { zh: '加油', py: 'jiā yóu', end: '！', en: 'You have got this.' },
+  { zh: '一天一點', py: 'yì tiān yì diǎn', end: '。', en: 'A little every day.' },
+  { zh: '慢慢來', py: 'màn màn lái', end: '。', en: 'Slow is fine — just keep going.' },
+  { zh: '再來五分鐘', py: 'zài lái wǔ fēn zhōng', end: '。', en: 'Five minutes beats zero minutes.' },
   { zh: '', en: 'You remember more than you think.' },
-  { zh: '我們一起學。', en: 'We study together.' },
+  { zh: '我們一起學', py: 'wǒ men yì qǐ xué', end: '。', en: 'We study together.' },
 ];
+/* The readings of bird.js's greetings (早安 / 午安 / 晚安). */
+const GREETING_PINYIN = { 早安: 'zǎo ān', 午安: 'wǔ ān', 晚安: 'wǎn ān' };
+const LATIN_PUNCT = { '！': '!', '。': '.', '，': ',' };
 
 /* ============================================================
    render
@@ -104,14 +112,52 @@ function unmount() {
 }
 
 /* ============================================================
-   1. hero — Plumi, the greeting, the goal ring, the streak
+   Chinese in Plumi's mouth, by the learner's display rules
+   ============================================================ */
+/* Characters for a character learner. For a speaking learner the reading
+   carries the phrase and the characters trail small, or not at all when hidden. */
+function phrase(zh, py, end = '') {
+  const mode = profile().hanzi;
+  if (mode === 'full' || !py) return h('span', { class: 'zh', lang: 'zh-Hant' }, zh + end);
+  const r = readingOf(zh, py);
+  const reading = r.kind === 'zhuyin'
+    ? h('span', { class: 'td-say zh', lang: 'zh-Hant' }, r.text + end)
+    : h('span', { class: 'td-say' }, r.text + (LATIN_PUNCT[end] ?? end));
+  if (mode === 'hidden') return reading;
+  return h('span', null, reading, ' ', h('span', { class: 'td-say-hz', lang: 'zh-Hant' }, zh));
+}
+function readingOf(zh, py) {
+  let zy = '';
+  try { zy = pinyinToZhuyin(py); } catch { zy = ''; }
+  return readingFor({ hanzi: zh, pinyin: py, zhuyin: zy }).primary || { text: py, kind: 'pinyin' };
+}
+function greetingNodes() {
+  const name = settings?.learnerName || '';
+  const zh = greeting('').replace(/！$/, '');
+  const py = GREETING_PINYIN[zh];
+  const mode = profile().hanzi;
+  if (mode === 'full' || !py) return [h('span', { class: 'zh', lang: 'zh-Hant' }, greeting(name))];
+  const r = readingOf(zh, py);
+  // A sentence starts with a capital, in pinyin as in English: "Wǎn ān, Arthur!"
+  const text = r.kind === 'pinyin' ? r.text.charAt(0).toUpperCase() + r.text.slice(1) : r.text;
+  const out = [
+    h('span', { class: `td-say${r.kind === 'zhuyin' ? ' zh' : ''}`, lang: r.kind === 'zhuyin' ? 'zh-Hant' : undefined }, text),
+    name ? `, ${name}!` : '!',
+  ];
+  if (mode === 'small') out.push(' ', h('span', { class: 'td-say-hz', lang: 'zh-Hant' }, zh));
+  return out;
+}
+function plural(n, word) { return n === 1 ? word : `${word}s`; }
+
+/* ============================================================
+   1. hero — Plumi, the greeting, then the goal and the streak
    ============================================================ */
 function hero() {
   bird = createBird({ size: 5, mood: heroMood(stats) });
 
   const line = h('span', { class: 'td-line muted' }, ...coachLine());
   const bubble = h('div', { class: 'bubble td-bubble' },
-    h('span', { class: 'td-hi zh', lang: 'zh-Hant' }, greeting(settings?.learnerName || '')),
+    h('span', { class: 'td-hi' }, ...greetingNodes()),
     line);
 
   // Plumi is a real button: tapping the bird is the one bit of pure delight on
@@ -119,43 +165,67 @@ function hero() {
   const tap = h('button', { class: 'td-bird', type: 'button', 'aria-label': 'Plumi says something' }, bird.el);
   tap.addEventListener('click', plumiSays);
 
-  const ringHost = h('div', { class: 'td-ring' }, goalRing());
-  const streakHost = h('div', { class: 'td-streak-box' }, ...streakParts());
+  const goalHost = h('div', { class: 'td-tile td-goal' }, ...goalParts());
+  const streakHost = h('div', { class: 'td-tile td-streak-tile' }, ...streakParts());
 
   const el = h('section', { class: 'td-hero' },
     h('div', { class: 'coach td-coach' }, tap, bubble),
-    h('div', { class: 'row td-numbers' }, ringHost, streakHost));
+    h('div', { class: 'td-numbers' }, goalHost, streakHost));
 
-  refs.hero = el; refs.line = line; refs.ringHost = ringHost; refs.streakHost = streakHost;
+  refs.hero = el; refs.line = line; refs.goalHost = goalHost; refs.streakHost = streakHost;
+  paintStreakCold();
   return el;
 }
 
-function goalRing() {
+/* The ring's disc holds only the number (ui.js ring()); the goal itself sits
+   under it, where it has the tile's whole width. */
+function goalParts() {
   const st = stats;
-  return ring(st?.xpToday || 0, st?.goal || settings?.dailyGoalXp || 30);
+  const xp = st?.xpToday || 0;
+  const goal = st?.goal || settings?.dailyGoalXp || 30;
+  const met = goalMet(st);
+  const r = ring(xp, goal);
+  // Four digits no longer fit the disc at this ring's size.
+  if (String(xp).length > 3) r.querySelector('.ring-label')?.classList.add('is-long');
+  return [r, h('span', { class: 'td-tile-txt' },
+    met
+      ? h('span', { class: 'td-tile-main is-done' }, 'Goal reached')
+      : h('span', { class: 'td-tile-main' }, `of ${fmt.n(goal)} XP today`),
+    h('span', { class: 'td-tile-sub' }, met ? `${fmt.n(xp)} of ${fmt.n(goal)} XP` : `${fmt.n(Math.max(0, goal - xp))} XP to go`))];
 }
 
 function streakParts() {
   const s = stats?.streak || {};
-  const cur = s.current || 0;
+  const n = s.current || 0;
   return [
-    h('span', { class: `streak td-streak${s.activeToday ? '' : ' is-cold'}`, title: 'Day streak' },
-      pixelIcon('flame', 3), String(cur)),
-    h('span', { class: 'small faint td-streak-meta' }, `day streak · best ${s.best || 0}`),
+    h('span', { class: 'td-flame', title: 'Day streak' }, pixelIcon('flame', 4), h('span', { class: 'td-flame-n' }, fmt.n(n))),
+    h('span', { class: 'td-tile-txt' },
+      h('span', { class: 'td-tile-main' }, 'day streak'),
+      // A running streak that today has not fed yet gets the nudge instead of the record.
+      h('span', { class: 'td-tile-sub' }, n > 0 && !s.activeToday ? 'Keep it going today' : `best ${fmt.n(s.best || 0)}`)),
   ];
+}
+function paintStreakCold() {
+  refs.streakHost?.classList.toggle('is-cold', !stats?.streak?.activeToday);
 }
 
 /* The coaching sentence under the greeting — the whole screen in one line. */
 function coachLine() {
   const st = stats;
   const goal = st?.goal || settings?.dailyGoalXp || 0;
-  if (goalMet(st)) return ['Goal reached. ', h('span', { class: 'zh', lang: 'zh-Hant' }, '太棒了！')];
-  if (isFirstRun()) return ['Start by adding your first class notes.'];
+  const focus = profile().focus;
+  if (goalMet(st)) return ['Goal reached. ', phrase('太棒了', 'tài bàng le', '！')];
+  if (isFirstRun()) return [focus === 'speaking' ? 'Add your first class notes, then say them out loud.' : 'Start by adding your first class notes.'];
   const c = counts();
-  const waiting = c.due + c.learning;        // a learning card is waiting too
-  if (waiting > 0) return [`${waiting} card${waiting === 1 ? ' is' : 's are'} waiting.`];
+  if (focus === 'speaking') {
+    if (c.due > 0) return [`${c.due} ${plural(c.due, 'phrase')} to say out loud.`];
+    if (c.new > 0) return [`${c.new} new ${plural(c.new, 'phrase')} to say out loud.`];
+    return ['All caught up. Try a few new words out loud?'];
+  }
+  const kind = focus === 'characters' ? 'character card' : 'card';
+  if (c.due > 0) return [`${c.due} ${plural(c.due, kind)} ${c.due === 1 ? 'is' : 'are'} waiting.`];
   if (!goal) return ['Ready when you are.'];
-  return ['All caught up — learn something new?'];
+  return [focus === 'characters' ? 'All caught up — learn a new character?' : 'All caught up — learn something new?'];
 }
 
 function heroMood(st) {
@@ -186,12 +256,13 @@ function plumiSays() {
     if (refs.line) { refs.line.classList.remove('td-pop'); refs.line.replaceChildren(...coachLine()); }
   }, 4200);
 }
+/* replaceChildren() turns a null into the text "null", so the gaps are filtered. */
 function sayNodes(s) {
   return [
-    s.zh ? h('span', { class: 'zh', lang: 'zh-Hant' }, s.zh) : null,
+    s.zh ? phrase(s.zh, s.py, s.end) : null,
     s.zh && s.en ? ' ' : null,
     s.en || null,
-  ];
+  ].filter((x) => x !== null);
 }
 
 /* ============================================================
@@ -199,18 +270,19 @@ function sayNodes(s) {
    ============================================================ */
 function todayWindow() {
   const c = counts();
-  const waiting = c.due + c.learning;
+  const focus = profile().focus;
+  const speaking = focus === 'speaking';
   const list = h('div', { class: 'list td-acts' });
 
   list.append(actionRow({
-    icon: 'review',
-    title: 'Review',
-    sub: hasCounts() ? `${c.due} due · ${c.learning} learning` : 'Your memo cards',
-    hot: waiting > 0,                        // the window's single terracotta pop
+    icon: speaking ? 'mic' : 'review',
+    title: speaking ? 'Practice speaking' : focus === 'characters' ? 'Review characters' : 'Review',
+    sub: reviewSub(c, focus),
+    hot: c.due > 0 || c.new > 0,             // the window's single terracotta pop
     onClick: () => navigate('/review'),
   }));
 
-  list.append(learnRow(c));
+  list.append(learnRow());
 
   // Hidden when there are no lessons at all; nothing to continue.
   if (ctx.lessons.length) {
@@ -228,8 +300,10 @@ function todayWindow() {
   const tooFew = words < 4;                  // a quiz needs distractors
   list.append(actionRow({
     icon: 'trophy',
-    title: 'Challenge',
-    sub: tooFew ? 'Add 4 words first' : 'Test everything you know',
+    title: speaking ? 'Speaking challenge' : 'Challenge',
+    sub: tooFew ? 'Add 4 words first'
+      : speaking ? 'Listen, pick and say it'
+        : focus === 'characters' ? 'Test the characters you know' : 'Test everything you know',
     off: tooFew,
     onClick: () => navigate('/challenge'),
   }));
@@ -239,19 +313,30 @@ function todayWindow() {
     list);
 }
 
-function learnRow(c) {
-  const open = openItems().length;
-  const suggAnswered = !!ctx.sugg;
-  let sub, act, mode;
-  if (open > 0) { sub = `${open} suggested today`; act = scrollToSugg; mode = 'sugg'; }
-  // No open suggestions (none yet, no key, or all handled): unseen cards in
-  // the deck are still something new to learn, so point at Review instead.
-  else if (!c.new) { sub = 'No suggestions yet'; act = scrollToSugg; mode = 'sugg'; }
-  else { sub = `${c.new} new card${c.new === 1 ? '' : 's'}`; act = () => navigate('/review'); mode = 'new'; }
-  const row = actionRow({ icon: 'bulb', title: 'Learn new words', sub, onClick: act });
+/* `due` already includes the learning cards that are due (docs §7). */
+function reviewSub(c, focus) {
+  if (!hasCounts()) return focus === 'speaking' ? 'Say your words out loud' : 'Your memo cards';
+  if (focus === 'speaking') {
+    if (c.due > 0) return `${c.due} ${plural(c.due, 'phrase')} to say out loud`;
+    if (c.new > 0) return `${c.new} new ${plural(c.new, 'phrase')} to say out loud`;
+    return 'All caught up';
+  }
+  if (c.due > 0) return `${c.due} due · ${c.learning} learning`;
+  if (c.new > 0) return `${c.new} new ${plural(c.new, 'card')} to learn`;
+  return 'All caught up';
+}
+
+/* New cards already have the practice row; this one is about today's suggestions. */
+function learnRow() {
+  const row = actionRow({ icon: 'bulb', title: 'Learn new words', sub: suggSub(), onClick: scrollToSugg });
   refs.learnSub = row.querySelector('.td-act-s');
-  refs.learnMode = mode;
   return row;
+}
+function suggSub() {
+  const n = openItems().length;
+  if (n) return profile().focus === 'speaking' ? `${n} new ${plural(n, 'word')} to hear and say` : `${n} suggested today`;
+  const items = Array.isArray(ctx.sugg?.items) ? ctx.sugg.items : [];
+  return items.length ? 'Done for today' : 'No suggestions yet';
 }
 
 function actionRow({ icon, title, sub, hot = false, off = false, onClick }) {
@@ -334,7 +419,7 @@ function paintSugg() {
     const added = items.some((i) => i.status === 'added');
     host.append(suggState(h('p', { class: 'td-done-line' },
       added ? 'All of today’s words are in your deck. ' : 'Nothing new for today. ',
-      h('span', { class: 'zh', lang: 'zh-Hant' }, '明天見！'))));
+      phrase('明天見', 'míng tiān jiàn', '！'))));
     return;
   }
 
@@ -409,13 +494,19 @@ async function runRefresh(btn) {
   }
 }
 
+/* The word leads by the learner's display rules (wordLine: pinyin first for a
+   speaking learner, 字 first for a character learner), with its play button
+   right beside it: hearing a new word is the first thing a speaker wants. */
 function suggRow(item, index) {
   const row = h('div', { class: 'list-row td-sug' });
   const acts = h('div', { class: 'td-sug-acts' });
+  const name = item.meaning || item.pinyin || item.hanzi;
 
   row.append(
-    h('div', { class: 'td-sug-hz' }, hanziEl({ hanzi: item.hanzi, zhuyin: item.zhuyin, pinyin: item.pinyin }, { size: 'md' })),
-    h('div', { class: 'grow td-sug-txt' },
+    h('div', { class: 'td-sug-txt' },
+      h('div', { class: 'td-sug-word' },
+        wordLine({ hanzi: item.hanzi, pinyin: item.pinyin, zhuyin: item.zhuyin }),
+        speakButton(item.hanzi, { label: `Play ${name}` })),
       h('div', { class: 'td-sug-mean' },
         item.meaning || '',
         item.meaningNative ? h('span', { class: 'muted td-sug-native' }, ` · ${item.meaningNative}`) : null),
@@ -426,15 +517,16 @@ function suggRow(item, index) {
 
   const add = h('button', { class: 'btn btn--sm btn--primary', type: 'button' }, pixelIcon('plus', 2), 'Add');
   add.addEventListener('click', () => accept(item, index, row, acts, add));
-  const no = h('button', { class: 'btn btn--sm btn--icon btn--quiet', type: 'button', 'aria-label': `Dismiss ${item.hanzi}`, title: 'Not today' }, pixelIcon('x', 2));
+  const no = h('button', { class: 'btn btn--sm btn--quiet', type: 'button', 'aria-label': `Skip ${name} today`, title: 'Not today' }, 'Skip');
   no.addEventListener('click', () => dismiss(item, index, row, no));
-  acts.append(speakButton(item.hanzi, { label: `Play ${item.hanzi}` }), add, no);
+  acts.append(add, no);
   return { row, acts };
 }
 
 function markAdded(row, acts) {
   row.classList.add('is-added');
-  acts.replaceChildren(h('span', { class: 'pl-tag good' }, pixelIcon('check', 2), 'Added'));
+  // A 12px check: the tag is 18px tall.
+  acts.replaceChildren(h('span', { class: 'pl-tag good' }, pixelIcon('check', 1), 'Added'));
 }
 
 async function accept(item, index, row, acts, btn) {
@@ -502,9 +594,8 @@ function addAllButton(pairs) {
 }
 
 function updateLearnRow() {
-  if (!refs.learnSub || refs.learnMode !== 'sugg') return;
-  const n = openItems().length;
-  refs.learnSub.replaceChildren(n ? `${n} suggested today` : 'No suggestions yet');
+  if (!refs.learnSub) return;
+  refs.learnSub.replaceChildren(suggSub());
 }
 
 function openItems() {
@@ -624,7 +715,7 @@ function welcome() {
   const b = createBird({ size: 5, mood: 'idle' });
   return h('section', { class: 'card td-welcome' }, emptyState({
     bird: b.el,
-    title: [h('span', { class: 'zh', lang: 'zh-Hant' }, '歡迎！'), ' Welcome to your study desk.'],
+    title: [phrase('歡迎', 'huān yíng', '！'), ' Welcome to your study desk.'],
     text: 'Paste your first class notes and Plumi builds your lesson and cards. Or add a word by hand.',
     action: h('div', { class: 'row row--wrap td-welcome-acts' },
       h('a', { class: 'btn btn--primary', href: '#/notes' }, pixelIcon('notes', 2), 'Add notes'),
@@ -637,8 +728,8 @@ function welcome() {
    ============================================================ */
 function paintStats() {
   const st = stats;
-  if (refs.ringHost) refs.ringHost.replaceChildren(goalRing());
-  if (refs.streakHost) refs.streakHost.replaceChildren(...streakParts());
+  if (refs.goalHost) refs.goalHost.replaceChildren(...goalParts());
+  if (refs.streakHost) { refs.streakHost.replaceChildren(...streakParts()); paintStreakCold(); }
   if (refs.line && !sayTimer) refs.line.replaceChildren(...coachLine());
   if (refs.board) refs.board.replaceChildren(...scores());
   if (refs.weekHost) refs.weekHost.replaceChildren(...weekInner());
@@ -683,10 +774,15 @@ function isDone(lesson) {
   const p = lesson?.progress;
   return lesson?.status === 'done' || !!(p && p.total > 0 && p.mastered === p.total);
 }
+/* A speaking learner reads the English title; the Chinese one trails as the
+   reference. A character learner reads 中文 first, as before. */
 function lessonLabel(lesson) {
   const zh = lesson?.titleZh;
   const en = lesson?.title || 'Lesson';
-  return zh ? [h('span', { class: 'zh', lang: 'zh-Hant' }, zh), ' · ', en] : [en];
+  const mode = profile().hanzi;
+  if (!zh || mode === 'hidden') return [en];
+  if (mode === 'small') return [en, ' · ', h('span', { class: 'zh', lang: 'zh-Hant' }, zh)];
+  return [h('span', { class: 'zh', lang: 'zh-Hant' }, zh), ' · ', en];
 }
 
 function ymd(d) {

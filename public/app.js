@@ -41,6 +41,11 @@ async function main() {
   on('route', ({ id }) => { markNav(id); document.getElementById('topbarTitle').textContent = ''; });
   initXpPops();
   themeButton();
+  // A learner who has not answered the welcome questions sees them first, once per
+  // page load: the answers decide how every other screen looks (§8.7).
+  if (settings && !settings.goals?.onboardedAt && !location.hash.startsWith('#/welcome')) {
+    history.replaceState(null, '', '#/welcome');
+  }
   await initRouter(document.getElementById('view'));
   // The boot wink runs once; drop the class so a re-render never replays it.
   setTimeout(() => document.body.classList.remove('pl-boot'), 900);

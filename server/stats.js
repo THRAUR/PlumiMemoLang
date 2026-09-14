@@ -7,6 +7,7 @@
 import { coll, doc } from './store.js';
 import * as srs from './srs.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROGRESS, deepMerge } from './defaults.js';
+import { normaliseTemplates, normaliseGoals } from '../shared/goals.js';
 
 const EMPTY_DAY = { xp: 0, reviews: 0, correct: 0, newWords: 0, challenges: 0, minutes: 0 };
 
@@ -25,7 +26,12 @@ export function shiftDay(ymd, delta = 0) {
 /* Settings as the rest of the server should see them: an old settings.json gains
    every field added to DEFAULT_SETTINGS since it was written. */
 export function readSettings() {
-  return deepMerge(DEFAULT_SETTINGS, doc('settings').get() || {});
+  const s = deepMerge(DEFAULT_SETTINGS, doc('settings').get() || {});
+  // Builtin card templates follow the code and goals are always complete, so an
+  // older settings file needs no migration step (§8.1).
+  s.cardTemplates = normaliseTemplates(s.cardTemplates);
+  s.goals = normaliseGoals(s.goals);
+  return s;
 }
 
 function readProgress() {

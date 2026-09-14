@@ -4,8 +4,12 @@
    graded reviews so scores and the streak are not all zero. */
 import fs from 'node:fs/promises';
 
-const base = (process.argv[2] || 'http://127.0.0.1:3080').replace(/\/$/, '');
-const file = process.argv[3] || new URL('../test/fixtures/seed.json', import.meta.url);
+const args = process.argv.slice(2);
+// --fresh leaves the welcome questions unanswered, so the app opens #/welcome.
+const fresh = args.includes('--fresh');
+const positional = args.filter((a) => !a.startsWith('--'));
+const base = (positional[0] || 'http://127.0.0.1:3080').replace(/\/$/, '');
+const file = positional[1] || new URL('../test/fixtures/seed.json', import.meta.url);
 const fx = JSON.parse(await fs.readFile(file, 'utf8'));
 
 async function call(method, path, body) {
@@ -39,4 +43,17 @@ for (const hz of fx.lessons[0].words) {
   if (!id) continue;
   try { await call('POST', '/review/grade', { wordId: id, grade: 2, templateId: 'recognition', ms: 3000 }); graded++; } catch (e) { console.warn(e.message); break; }
 }
-console.log(`seeded ${lessons.length} lessons, ${idByHanzi.size} words, ${graded} grades at ${base}`);
+// Answer the welcome questions as the first real learner did: speak and understand,
+// pinyin, characters small. Without this every route redirects to #/welcome and a
+// screenshot sweep shows nothing but the first question.
+if (!fresh) {
+  const current = await call('GET', '/settings');
+  const speaking = ['say', 'listening', 'sound'];
+  await call('PUT', '/settings', {
+    goals: { skills: ['speak', 'listen'], reasons: ['taiwan'], classes: 'regular', about: 'Seeded for QA.', onboardedAt: new Date().toISOString() },
+    script: 'pinyin',
+    display: { hanzi: '' },
+    cardTemplates: current.cardTemplates.map((t) => (t.builtin ? { ...t, enabled: speaking.includes(t.id) } : t)),
+  });
+}
+console.log(`seeded ${lessons.length} lessons, ${idByHanzi.size} words, ${graded} grades at ${base}${fresh ? ' (goals left unanswered)' : ' (speaking goals answered)'}`);

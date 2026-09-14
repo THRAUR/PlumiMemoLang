@@ -225,7 +225,7 @@ body {
 /* Chinese never inherits Karla; the platform CJK face renders it. */
 [lang="zh-Hant"], .zh { font-family: var(--font-zh); }
 a { color: var(--accent-text); text-decoration: none; }
-a:hover { text-decoration: underline; }
+@media (hover: hover) { a:hover { text-decoration: underline; } }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 img, svg { display: block; max-width: 100%; }
@@ -309,8 +309,8 @@ p { margin: 0; }
   border-radius: 1px;
   transition: background var(--dur-fast) linear;
 }
-.pl-close:hover { color: var(--text); }
-.pl-close:hover::before { background: currentColor; }
+@media (hover: hover) { .pl-close:hover { color: var(--text); } }
+@media (hover: hover) { .pl-close:hover::before { background: currentColor; } }
 .pl-close:active::before { background: var(--accent); border-color: var(--accent); }
 .win-body { padding: 18px; }
 .win-body > * + * { margin-top: 14px; }

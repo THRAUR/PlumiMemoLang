@@ -14,6 +14,9 @@
    known-word list is sent as bare hanzi, and `suggest`/`reading` never see a
    full Word object. */
 
+import { SKILLS, REASONS } from '../../shared/goals.js';
+import { groupRanges } from '../../shared/pages.js';
+
 export const POS = ['n', 'v', 'adj', 'adv', 'mw', 'conj', 'prep', 'part', 'interj', 'pron', 'num', 'expr', ''];
 export const WORD_TYPES = ['character', 'word', 'phrase', 'sentence', 'grammar'];
 export const SECTION_KINDS = ['vocab', 'grammar', 'dialogue', 'culture', 'tip', 'text'];
@@ -22,7 +25,7 @@ export const LEVELS = ['beginner', 'elementary', 'intermediate', 'advanced'];
 export const NOTES_CAP = 40000;        // characters of raw notes we are willing to send
 export const KNOWN_CAP_EXTRACT = 1500; // hanzi listed for "already known"
 export const KNOWN_CAP_SUGGEST = 1200;
-export const IMAGE_CAP = 10;           // photos per extract call
+export const IMAGE_CAP = 20;           // photos or document pages per extract call (documents allow 20 pages)
 export const READING_WORDS_CAP = 40;
 
 const LEVEL_HINT = {
@@ -53,7 +56,8 @@ function levelLine(level) {
 
 /* The same teacher for every task. `json: false` is only for the connection
    test, which wants one plain sentence. */
-export function systemPrompt({ nativeLanguage = 'en', level = 'beginner', script = 'zhuyin' } = {}, { json = true } = {}) {
+export function systemPrompt(learner = {}, { json = true } = {}) {
+  const { nativeLanguage = 'en', level = 'beginner', script = 'zhuyin' } = learner || {};
   const native = languageName(nativeLanguage);
   const lines = [
     'You are an expert Mandarin teacher writing study material for one adult learner who takes Traditional Chinese classes in Taiwan.',
@@ -69,12 +73,40 @@ export function systemPrompt({ nativeLanguage = 'en', level = 'beginner', script
       ? '- Leave every "meaningNative" field as an empty string (the learner works in English).'
       : `- "meaningNative" is the same meaning written in ${native}. Keep it short, no explanation.`,
     `- The learner's level is ${levelLine(level)}. Keep example sentences inside that range.`,
+    ...goalLines(learner),
     '- Never invent a reading, a character or a usage you are unsure of; choose a simpler word you are sure about instead.',
   ];
   if (json) {
     lines.push('- Answer with JSON only: no prose before or after, no markdown, no code fences. Use exactly the requested keys; use "" or [] for anything you do not have.');
   }
   return lines.join('\n');
+}
+
+/* What the learner told the welcome questions (shared/goals.js), in words a model
+   can act on. The focus line is the one that changes the material: a learner who
+   wants to SPEAK needs phrases they can say, not character trivia. */
+function goalLines(learner) {
+  const g = learner?.goals || {};
+  const lines = [];
+  const skillWords = { speak: 'speak', listen: 'understand spoken Chinese', read: 'read characters', write: 'write characters', type: 'type Chinese' };
+  const skills = (g.skills || []).filter((id) => SKILLS.some((x) => x.id === id)).map((id) => skillWords[id]);
+  if (skills.length) lines.push(`- What the learner wants to be able to do: ${skills.join(', ')}.`);
+  const reasons = (g.reasons || []).map((id) => REASONS.find((x) => x.id === id)?.label.toLowerCase()).filter(Boolean);
+  if (reasons.length) lines.push(`- Why they learn: ${reasons.join(', ')}. Pick topics and examples that fit.`);
+  if (g.classes === 'regular' || g.classes === 'sometimes') lines.push('- They take classes with a teacher; their notes and pages come from those classes.');
+  const about = String(g.about || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (about) lines.push(`- In their own words: "${about}"`);
+  if (learner?.focus === 'speaking') {
+    lines.push(
+      '- FOCUS: SPEAKING AND LISTENING. They read pinyin and English; characters are only a reference to check the original meaning.',
+      '  Prefer phrases and sentence patterns they can say today over single characters, natural spoken Taiwanese Mandarin,',
+      '  and example sentences short enough to repeat aloud (at most about 14 syllables). Add pronunciation notes where they help',
+      '  (tones, tone sandhi of 一, 不 and third tones, common Taiwan pronunciations). No stroke order, radicals or character trivia.',
+    );
+  } else if (learner?.focus === 'characters') {
+    lines.push('- FOCUS: READING AND WRITING CHARACTERS. Character components, radicals and look-alike characters make useful notes.');
+  }
+  return lines;
 }
 
 /* ── small helpers ───────────────────────────────────────────────────────── */
@@ -130,57 +162,68 @@ const WORD_DRAFT = {
   },
 };
 
+const LESSON = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: 'English, ≤ 6 words' },
+    titleZh: { type: 'string', description: 'Traditional characters, ≤ 8 characters' },
+    summary: { type: 'string', description: '2–4 sentences, English' },
+    sections: {
+      type: 'array',
+      description: '2–6 cards in reading order',
+      items: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: SECTION_KINDS },
+          title: { type: 'string' },
+          titleZh: { type: 'string' },
+          body: { type: 'string', description: "plain text or light markdown (**bold**, lines starting with '- ')" },
+        },
+      },
+    },
+    grammar: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'e.g. "A 比 B + adj"' },
+          explanation: { type: 'string', description: 'English, 1–3 sentences' },
+          examples: { type: 'array', description: 'exactly 2', items: EXAMPLE },
+        },
+      },
+    },
+    dialogue: {
+      type: 'array',
+      description: '4–8 lines, or empty when the material does not suggest one',
+      items: {
+        type: 'object',
+        properties: {
+          speaker: { type: 'string', description: 'A / B or a name' },
+          zh: { type: 'string' },
+          pinyin: { type: 'string' },
+          zhuyin: { type: 'string' },
+          translation: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 export const SCHEMAS = {
   extract: {
     type: 'object',
     properties: {
-      lesson: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'English, ≤ 6 words' },
-          titleZh: { type: 'string', description: 'Traditional characters, ≤ 8 characters' },
-          summary: { type: 'string', description: '2–4 sentences, English' },
-          sections: {
-            type: 'array',
-            description: '2–6 cards in reading order',
-            items: {
-              type: 'object',
-              properties: {
-                kind: { type: 'string', enum: SECTION_KINDS },
-                title: { type: 'string' },
-                titleZh: { type: 'string' },
-                body: { type: 'string', description: "plain text or light markdown (**bold**, lines starting with '- ')" },
-              },
-            },
-          },
-          grammar: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                pattern: { type: 'string', description: 'e.g. "A 比 B + adj"' },
-                explanation: { type: 'string', description: 'English, 1–3 sentences' },
-                examples: { type: 'array', description: 'exactly 2', items: EXAMPLE },
-              },
-            },
-          },
-          dialogue: {
-            type: 'array',
-            description: '4–8 lines, or empty when the notes do not suggest one',
-            items: {
-              type: 'object',
-              properties: {
-                speaker: { type: 'string', description: 'A / B or a name' },
-                zh: { type: 'string' },
-                pinyin: { type: 'string' },
-                zhuyin: { type: 'string' },
-                translation: { type: 'string' },
-              },
-            },
+      lessons: {
+        type: 'array',
+        description: '1 to 4 lessons, as the split instruction says',
+        items: {
+          type: 'object',
+          properties: {
+            lesson: LESSON,
+            words: { type: 'array', description: '6–40 entries', items: WORD_DRAFT },
           },
         },
       },
-      words: { type: 'array', description: '6–40 entries', items: WORD_DRAFT },
     },
   },
 
@@ -259,12 +302,35 @@ export const SCHEMAS = {
 
 /* ── user messages ───────────────────────────────────────────────────────── */
 
+export const LESSONS_MAX = 4;
+
+/* How many lessons one source becomes. `per-range` follows the page ranges the
+   learner typed ("9–11, 25" → two lessons); `auto` lets the model find units. */
+function splitRule(input) {
+  const split = ['one', 'per-range', 'auto'].includes(input?.split) ? input.split : 'one';
+  if (split === 'per-range') {
+    const printed = (Array.isArray(input?.pages) ? input.pages : []).map((p) => Number(p?.printed ?? p?.pdf)).filter(Number.isFinite);
+    const ranges = groupRanges(printed).slice(0, LESSONS_MAX).map(([a, b]) => (a === b ? `page ${a}` : `pages ${a}–${b}`));
+    if (ranges.length > 1) {
+      return `Make one lesson per page range, in this order: ${ranges.map((r, i) => `lesson ${i + 1} = ${r}`).join('; ')}.`;
+    }
+  }
+  if (split === 'auto') {
+    return `Make one lesson per coherent unit or topic in the material (a textbook unit, a dialogue with its vocabulary, a grammar topic), at most ${LESSONS_MAX}. Never split one dialogue or one grammar explanation across lessons. One lesson is right when the material is one topic.`;
+  }
+  return 'Make exactly ONE lesson that covers everything below.';
+}
+
 function extractMessage(input, learner) {
   const title = String(input?.title || '').trim();
   const classDate = String(input?.classDate || '').trim();
   const rawText = String(input?.text || '');
   const text = rawText.slice(0, NOTES_CAP);
   const truncated = rawText.length > NOTES_CAP;
+  const instructions = String(input?.instructions || '').trim().slice(0, 2000);
+  const pages = Array.isArray(input?.pages) ? input.pages : [];
+  const isDocument = pages.length > 0;
+  const sourceTitle = String(input?.source?.title || '').trim();
 
   const images = (Array.isArray(input?.images) ? input.images : [])
     .map((im) => (typeof im === 'string' ? im : im?.dataUrl || im?.url || ''))
@@ -273,25 +339,46 @@ function extractMessage(input, learner) {
   const droppedImages = (Array.isArray(input?.images) ? input.images.length : 0) - images.length;
 
   const parts = [
-    'Turn these class notes into one lesson card plus its vocabulary list.',
+    isDocument
+      ? 'Turn these pages into lesson cards, each with its vocabulary list.'
+      : 'Turn these class notes into lesson cards, each with its vocabulary list.',
     '',
-    `Lesson title the learner gave: ${title || '(none — write one)'}`,
+    `Title the learner gave: ${title || '(none — write one per lesson)'}`,
     `Class date: ${classDate || '(unknown)'}`,
     `Learner level: ${levelLine(learner.level)}`,
     `Reading the learner studies with: ${learner.script}`,
     `Learner's language for meaningNative: ${isEnglish(learner.nativeLanguage) ? 'English — leave meaningNative empty' : languageName(learner.nativeLanguage)}`,
     '',
+    splitRule(input),
+    '',
   ];
 
+  if (isDocument) {
+    const labels = pages.map((p) => (p?.printed && Number(p.printed) !== Number(p.pdf) ? `page ${p.printed} (PDF page ${p.pdf})` : `page ${p?.pdf ?? p?.printed}`));
+    parts.push(
+      `Source: ${sourceTitle ? `"${sourceTitle}", ` : ''}${labels.length} page${labels.length > 1 ? 's' : ''}: ${labels.join(', ')}.`,
+      `The pages are attached as images in that order${droppedImages > 0 ? ` (${droppedImages} more were left out)` : ''}. They may be scans of a textbook: read everything on them — dialogues, vocabulary tables, grammar boxes, exercises — before you structure anything. Ignore page furniture (running headers, page numbers, publisher notes).`,
+      '',
+    );
+  }
+  if (instructions) {
+    parts.push("--- THE LEARNER'S INSTRUCTIONS FOR THIS MATERIAL (follow them) ---", instructions, '--- END OF INSTRUCTIONS ---', '');
+  }
   if (text.trim()) {
-    parts.push('--- RAW NOTES (verbatim, messy, possibly mixed languages) ---', text.trim(), '--- END OF NOTES ---');
-    if (truncated) parts.push(`(The notes were longer than ${NOTES_CAP.toLocaleString('en-US')} characters and were cut here. Work with what you have.)`);
+    parts.push(
+      isDocument
+        ? '--- TEXT LAYER OF THE PAGES (may be incomplete or garbled; the images are the truth) ---'
+        : '--- RAW NOTES (verbatim, messy, possibly mixed languages) ---',
+      text.trim(),
+      isDocument ? '--- END OF TEXT LAYER ---' : '--- END OF NOTES ---',
+    );
+    if (truncated) parts.push(`(The text was longer than ${NOTES_CAP.toLocaleString('en-US')} characters and was cut here. Work with what you have.)`);
     parts.push('');
   } else if (!images.length) {
-    parts.push('(No text and no photos were provided — say so by returning an empty words array.)', '');
+    parts.push('(No text and no photos were provided — say so by returning an empty lessons array.)', '');
   }
 
-  if (images.length) {
+  if (images.length && !isDocument) {
     parts.push(
       `${images.length} photo${images.length > 1 ? 's' : ''} of the same class ${images.length > 1 ? 'are' : 'is'} attached: handwritten notes, a whiteboard, or textbook pages${droppedImages > 0 ? ` (${droppedImages} more were left out)` : ''}.`,
       'Read every photo carefully and transcribe what it contains first, in your head — characters, readings, translations, the teacher\'s examples, anything in the margins — then structure the result. Do not describe the photos.',
@@ -301,17 +388,20 @@ function extractMessage(input, learner) {
 
   parts.push(
     knownBlock(input?.knownHanzi, KNOWN_CAP_EXTRACT, 'Words the learner already knows'),
-    'Set "isKnown": true for any word from that list. Still include such a word when the lesson genuinely needs it (a grammar pattern, a dialogue line); do not pad the list with words the notes never mention.',
+    'Set "isKnown": true for any word from that list. Still include such a word when a lesson genuinely needs it (a grammar pattern, a dialogue line); do not pad the list with words the material never mentions.',
     '',
-    'Produce:',
+    'Answer { "lessons": [ { "lesson": { … }, "words": [ … ] } ] }. For EACH lesson:',
     '1. lesson.title — English, ≤ 6 words — and lesson.titleZh in Traditional characters.',
-    '2. lesson.summary — 2–4 sentences: what this class covered and what the learner should be able to do.',
-    '3. lesson.sections — 2 to 6 cards, kind ∈ vocab | grammar | dialogue | culture | tip | text, in reading order. Body is plain text or light markdown ("- " bullets, **bold**). This is where the teacher\'s explanations go.',
-    '4. lesson.grammar — every pattern the notes touch, each with a short English explanation and exactly 2 examples (zh + pinyin + zhuyin + translation).',
-    '5. lesson.dialogue — 4 to 8 lines of natural spoken Taiwanese Mandarin reusing this lesson\'s words, if the notes suggest a conversation; otherwise [].',
-    '6. words — 6 to 40 entries, every vocabulary item the notes contain (add the obvious siblings the teacher would expect, no filler). type ∈ character | word | phrase | sentence | grammar. Each entry: hanzi, pinyin, zhuyin, meaning, meaningNative, pos, 1–2 examples, tags, isKnown.',
+    '2. lesson.summary — 2–4 sentences: what it covers and what the learner should be able to do afterwards.',
+    '3. lesson.sections — 2 to 6 cards, kind ∈ vocab | grammar | dialogue | culture | tip | text, in reading order. Body is plain text or light markdown ("- " bullets, **bold**). This is where explanations go.',
+    '4. lesson.grammar — every pattern the lesson touches, each with a short English explanation and exactly 2 examples (zh + pinyin + zhuyin + translation).',
+    '5. lesson.dialogue — 4 to 8 lines of natural spoken Taiwanese Mandarin reusing the lesson\'s words when the material has or suggests a conversation; otherwise [].',
+    '6. words — 6 to 40 entries: every vocabulary item of that lesson, plus the obvious siblings a teacher would expect, no filler. type ∈ character | word | phrase | sentence | grammar. Each entry: hanzi, pinyin, zhuyin, meaning, meaningNative, pos, 1–2 examples, tags, isKnown.',
     '',
-    'Prefer the words the notes actually contain over words you would have chosen. If the notes are ambiguous, follow the more common Taiwan usage and say so in notes.',
+    learner.focus === 'speaking'
+      ? 'This learner is learning to SPEAK: prefer words, phrases and whole sentences people actually say; list a single character only when it is a word on its own; keep examples short enough to say aloud.'
+      : 'Prefer the words the material actually contains over words you would have chosen.',
+    'If something is ambiguous, follow the more common Taiwan usage and say so in notes.',
   );
 
   const content = [{ type: 'text', text: parts.join('\n') }];
@@ -336,6 +426,9 @@ function suggestMessage(input, learner) {
     `- None of them may appear in the known list${count > 1 ? ', and no duplicates among them' : ''}.`,
     '- Each item: hanzi, pinyin, zhuyin, meaning, meaningNative, pos, why (one sentence, concrete), one short example sentence with pinyin, zhuyin and translation, and 1–3 tags.',
   ];
+  if (learner.focus === 'speaking') {
+    parts.push('- This learner is learning to SPEAK: suggest words and short phrases people say out loud in daily life in Taiwan, not literary or written-only words. Put the most useful one first.');
+  }
   return [{ role: 'user', content: parts.join('\n') }];
 }
 
@@ -403,6 +496,9 @@ function readingMessage(input, learner) {
     '- questions: 3 or 4 comprehension questions in English, each with exactly 4 short options and answerIndex (0-based) pointing at the correct one. Wrong options must be plausible but clearly wrong to someone who understood the passage.',
     '- title: English, ≤ 6 words.',
   ];
+  if (learner.focus === 'speaking') {
+    parts.push('- This learner is learning to SPEAK and LISTEN: write the passage as a short spoken exchange between two people (label the speakers), in words people really say.');
+  }
   return [{ role: 'user', content: parts.join('\n') }];
 }
 

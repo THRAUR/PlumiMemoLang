@@ -11,6 +11,43 @@
 .st-seg { max-width: 100%; }
 .st-num { max-width: 160px; }
 
+/* ---------- your goals ----------
+   Skills and reasons are multi-select, so an "on" chip is ink with a check, the
+   same as in the welcome questions: a row of terracotta chips would break the
+   one-accent rule. The window's accent is the segments' active state, and
+   "Switch my cards to match" when it shows. */
+.st-goalhead { display: flex; align-items: center; gap: 8px; }
+.st-goalhead .label { flex: 1; min-width: 0; }
+.st-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Denser than the welcome chips (a 12px mark, 14px text): at 375px "Read
+   characters" and "Write characters" share a row instead of taking one each. */
+.st-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 44px; padding: 7px 11px 7px 9px;
+  background: var(--surface); color: var(--muted);
+  border: var(--bw-strong) solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.2; text-align: left;
+  transition: transform var(--dur-fast) var(--ease-snap), box-shadow var(--dur-fast), background var(--dur-fast);
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+@media (hover: hover) { .st-chip:hover { background: var(--surface-2); } }
+.st-chip:active { transform: translate(2px, 2px); box-shadow: none; }
+.st-chip .px { color: var(--faint); }
+.st-chip.is-on { color: var(--text); border-color: var(--text); box-shadow: 2px 2px 0 var(--text); }
+.st-chip.is-on .px { color: var(--text); }
+.st-goalhint {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+  padding: 10px 12px; margin-top: 4px;
+  background: var(--surface-2); border: var(--bw) solid var(--line-strong); border-radius: var(--r-md);
+}
+.st-goalhint-text { flex: 1 1 160px; min-width: 0; font-size: 14px; line-height: 1.35; }
+.st-goalhint .btn { min-height: 44px; }
+.st-about { min-height: 88px; }
+.st-countrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.st-count { flex: none; font-size: 12px; color: var(--faint); }
+.st-again { gap: 10px 14px; }
+.st-again .help { flex: 1 1 180px; min-width: 0; }
+
 /* A field list rendered as tags: hanzi → reading, meaning */
 .st-fields { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .st-arrow { color: var(--faint); font-family: var(--font-mono); padding: 0 2px; }
@@ -26,50 +63,36 @@
 .st-keyform .input { flex: 1; min-width: 180px; }
 .st-keyactions { gap: 10px; }
 
-/* ---------- models ---------- */
-.st-defaultrow { display: flex; flex-direction: column; gap: 6px; }
-.st-modelsrow { gap: 10px; }
-.st-modelsnote { flex: 1; min-width: 180px; }
-/* The button IS the value: it shows the model id it would change, so it has
-   to be allowed to be long and to truncate rather than blow up the row. */
-.st-modelbtn {
-  max-width: 100%; min-width: 0;
-  justify-content: flex-start;
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0; text-transform: none;
+/* ---------- model order ---------- */
+/* The rank is structure, not decoration: it is the order a lesson is tried in.
+   Rank 1 is filled with ink, the way a finished node on the path is. No
+   terracotta: Save key already holds this window's one accent. */
+.st-prio .list-row { flex: none; }
+.st-prio-row { align-items: flex-start; gap: 12px; padding: 12px 8px 12px 12px; }
+.st-rank {
+  flex: none; width: 30px; height: 30px; margin-top: 1px;
+  display: grid; place-items: center;
+  border: var(--bw-strong) solid var(--line-strong); border-radius: var(--r-sm);
+  font-family: var(--font-display); font-size: 16px; font-weight: 700; line-height: 1; color: var(--muted);
 }
-.st-modelbtn .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.st-modelpick { gap: 4px; min-width: 0; }
-.st-modelpick .st-modelbtn { flex: 1; }
+.st-rank.is-first { background: var(--text); border-color: var(--text); color: var(--bg); }
+.st-prio-main { display: flex; flex-direction: column; gap: 5px; }
+.st-prio-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.st-prio-name { font-size: 16px; }
+.st-prio-why { font-size: 13px; line-height: 1.4; color: var(--muted); }
+.st-prio-meta { font-size: 11px; color: var(--faint); }
+.st-prio-actions { margin-top: 4px; }
+.st-prio-move { flex: none; display: flex; flex-direction: column; gap: 10px; }
+.st-prio-foot { gap: 10px; }
+.st-prio-note { flex: 1; min-width: 180px; }
 /* 34px of ink, 44px of touch. */
-.st-modelpick .btn--icon, .st-tpl > .btn--icon { position: relative; }
-.st-modelpick .btn--icon::after, .st-tpl > .btn--icon::after { content: ""; position: absolute; inset: -5px; }
+.st-prio-move .btn--icon, .st-tpl > .btn--icon { position: relative; }
+.st-prio-move .btn--icon::after, .st-tpl > .btn--icon::after { content: ""; position: absolute; inset: -5px; }
 
-.st-task { align-items: flex-start; flex-wrap: wrap; padding: 12px 14px; }
-.st-task-main { display: flex; flex-direction: column; gap: 4px; }
-.st-task-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.st-task-why { font-size: 13px; color: var(--faint); }
-.st-task-pick { flex: none; width: 100%; min-width: 0; }
-@media (min-width: 640px) {
-  .st-task-pick { width: auto; max-width: 46%; }
-}
-
-/* ---------- the model picker window ---------- */
-.st-pickerbox { min-height: 0; }
-.st-picker { max-height: 52vh; overflow: auto; -webkit-overflow-scrolling: touch; }
 /* .list is a column flex box: once it has a max-height its rows SHRINK
-   below their content and two lines of model meta land on the row below.
+   below their content and two lines of meta land on the row below.
    Any scrolling list in this view has to opt out of shrinking. */
-.st-picker .list-row, .st-usage .list-row { flex: none; }
-.st-model { align-items: flex-start; gap: 10px; padding: 10px 12px; }
-.st-model.is-current { background: var(--accent-dim); }
-.st-model-main { display: flex; flex-direction: column; gap: 2px; }
-.st-model-name { font-weight: 700; }
-.st-model-id { font-size: 11px; color: var(--faint); }
-.st-model-meta {
-  display: flex; flex-wrap: wrap; gap: 2px 10px;
-  font-family: var(--font-mono); font-size: 11px; color: var(--muted);
-}
-.st-model-tags { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.st-usage .list-row { flex: none; }
 
 /* ---------- usage ---------- */
 .st-usagebox { display: flex; flex-direction: column; gap: 12px; }

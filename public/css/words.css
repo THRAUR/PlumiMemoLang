@@ -4,16 +4,22 @@
 .wd-head { justify-content: space-between; }
 .wd-head-title { gap: 10px; }
 
-/* ---------- filter row: one line, scrolls sideways on a phone ---------- */
-.wd-filters { display: flex; align-items: center; gap: 10px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
-.wd-filters > * { flex: none; }
-.wd-filters select { width: auto; min-width: 130px; }
+/* ---------- filter row: wraps rather than scrolling sideways ---------- */
+/* A select cut off at the screen edge reads as broken on a phone and hides the filters
+   after it. So on a phone: sort on one line, the lesson on the next, band and type side
+   by side; wide screens keep one line. min-width: 0 lets a select shrink below its
+   longest option. */
+.wd-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.wd-filters .seg { flex: 1 0 auto; }
+.wd-filters .seg button { flex: 1 1 auto; }
+.wd-filters .select { flex: 1 1 130px; width: auto; min-width: 0; }
+.wd-filters .seg + .select { flex: 2 1 200px; }   /* the lesson select: lesson names run longest */
+@media (max-width: 639px) { .wd-filters .seg + .select { flex-basis: 100%; } }
 
 /* ---------- result rows: two lines on a phone (hanzi+reading / meaning+meter) ---------- */
 .wd-row { align-items: stretch; }
 .wd-row-main { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; flex: 1; }
 .wd-row-l1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.wd-row-l1 .reading { font-size: 13px; }
 .wd-row-l2 { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .wd-row-meaning { flex: 1; min-width: 0; }
 .wd-row-l2 .meter { width: 70px; flex: none; }
@@ -48,3 +54,18 @@
 .wd-enrich .bird { transform: scale(.75); transform-origin: left center; }
 
 .wd-answer { border-top: var(--bw) solid var(--line); padding-top: 12px; }
+
+/* hanzi.js's exampleEl() has no speak option, so the button rides beside the
+   (possibly multi-line) sentence in its own row instead of inside it. */
+.wd-example-row { align-items: flex-start; }
+.wd-example-row .btn--icon { margin-top: 2px; }
+
+/* ---------- "Practice saying it" (§8.4) ---------- */
+.wd-practice-row { gap: 10px; }
+/* The card is left-aligned text; the record control's own centering (app.css
+   .rec) would otherwise float the mic button away from everything else. */
+.wd-practice .rec { justify-content: flex-start; }
+.wd-practice-check { gap: 8px; align-items: flex-start; }
+.wd-practice-result { padding: 10px 12px; border-radius: var(--r-md); background: var(--sunk); }
+.wd-practice-ok { display: flex; align-items: center; gap: 8px; color: var(--green); font-weight: 700; }
+.wd-practice-heard { font-size: 20px; margin-top: 2px; }

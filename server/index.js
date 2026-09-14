@@ -5,15 +5,20 @@ import { config } from './config.js';
 import { initStore, flushAll, coll, doc } from './store.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROGRESS } from './defaults.js';
 import { mountRoutes } from './routes/index.js';
+import { recoverInterruptedNotes } from './routes/notes.js';
 
 /* Register every collection before loading so a route that only imports a
    store lazily still finds its file read from disk. */
-for (const name of ['words', 'lessons', 'notes', 'usage']) coll(name);
+for (const name of ['words', 'lessons', 'notes', 'materials', 'usage']) coll(name);
 doc('settings', DEFAULT_SETTINGS);
 doc('progress', DEFAULT_PROGRESS);
 doc('suggestions', {});
 doc('models-cache', {});
 await initStore();
+{
+  const recovered = recoverInterruptedNotes();
+  if (recovered) console.log(`[notes] ${recovered} note(s) were interrupted by a restart and marked for retry`);
+}
 
 const app = express();
 app.disable('x-powered-by');

@@ -1,6 +1,7 @@
 /* Shared UI helpers. Everything builds DOM with h(): text children are set
    as text nodes, so nothing a learner (or a model) typed can become markup. */
 import { settings, on } from './state.js';
+import { learnerProfile } from '/shared/goals.js';
 
 /* ---------- DOM ---------- */
 export function h(tag, attrs, ...children) {
@@ -142,7 +143,8 @@ export function ring(value, goal, { label = 'XP' } = {}) {
   const pct = Math.max(0, Math.min(1, goal ? value / goal : 0));
   const el = h('div', { class: `ring${pct >= 1 ? ' is-done' : ''}`, role: 'img', 'aria-label': `${value} of ${goal} ${label} today` });
   el.innerHTML = `<svg viewBox="0 0 72 72"><circle class="ring-track" cx="36" cy="36" r="${r}"></circle><circle class="ring-fill" cx="36" cy="36" r="${r}" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct)}"></circle></svg>`;
-  el.append(h('div', { class: 'ring-label' }, `${value}`, h('small', null, `/ ${goal} ${label}`)));
+  // Only the number and the unit fit inside the disc; the goal is shown beside the ring.
+  el.append(h('div', { class: `ring-label${String(value).length >= 4 ? ' is-long' : ''}` }, `${value}`, h('small', null, label)));
   return el;
 }
 export function emptyState({ title, text, action, bird = null }) {
@@ -156,15 +158,16 @@ export function emptyState({ title, text, action, bird = null }) {
 export function busy(button, on = true) { button.classList.toggle('is-busy', on); button.disabled = on; }
 
 /* ---------- celebration ---------- */
-export function celebrate(root, n = 42) {
+/* Confetti lives in its own fixed layer on <body>. Screens repaint right after a
+   success (an import, the end of a session), and confetti inside the screen would
+   be taken down with it. `root` is still accepted so existing callers need no change. */
+export function celebrate(_root, n = 42) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const box = h('div', { class: 'confetti', 'aria-hidden': 'true' });
   for (let i = 0; i < n; i++) {
     box.append(h('i', { style: { '--x': `${Math.random() * 100}%`, '--d': `${1.4 + Math.random() * 1.4}s`, '--delay': `${Math.random() * 0.5}s`, '--r': `${(Math.random() > .5 ? 1 : -1) * (180 + Math.random() * 540)}deg` } }));
   }
-  const pos = getComputedStyle(root).position;
-  if (pos === 'static') root.style.position = 'relative';
-  root.append(box);
+  document.body.append(box);
   setTimeout(() => box.remove(), 3200);
 }
 
@@ -259,8 +262,17 @@ export function readingFor(word) {
   const py = word?.pinyin ? { text: word.pinyin, kind: 'pinyin' } : null;
   if (script === 'pinyin') return { primary: py || zy, secondary: py && zy ? zy : null };
   if (script === 'both') return { primary: zy || py, secondary: zy && py ? py : null };
-  return { primary: zy || py, secondary: null };
+  // The secondary is only SHOWN when a caller asks for both readings (readingEl
+  // with both: true) or the script is 'both'; returning it here costs nothing and
+  // lets a 注音 learner's word page show the pinyin too.
+  return { primary: zy || py, secondary: zy && py ? py : null };
 }
+/* The learner's goals as every screen needs them (shared/goals.js). Computed on each
+   call, because the welcome questions and Settings change them at runtime. */
+export function profile() { return learnerProfile(settings || {}); }
+/* How prominent characters are: 'full' | 'small' | 'hidden' (§8.3). */
+export function hanziMode() { return profile().hanzi; }
+
 export function readingEl(word, { size = '', both = false } = {}) {
   const r = readingFor(word);
   if (!r.primary) return null;
@@ -313,7 +325,8 @@ export function feedback(session, { ok, title, detail = null, actionLabel = 'Con
   b.className = `banner ${ok ? 'banner--ok' : 'banner--bad'}`;
   b.replaceChildren(
     h('div', { class: 'banner-title' }, pixelIcon(ok ? 'check' : 'x', 3), title || (ok ? 'Correct!' : 'Not quite')),
-    detail ? h('div', { class: 'banner-detail' }, detail) : null,
+    // replaceChildren() would print a null child as the word "null".
+    ...(detail ? [h('div', { class: 'banner-detail' }, detail)] : []),
     h('div', { class: 'banner-actions' }, extra, h('button', { class: `btn btn--lg ${ok ? 'btn--ok' : 'btn--danger'}`, type: 'button', onClick: () => { hideFeedback(session); onAction && onAction(); } }, actionLabel)),
   );
   b.hidden = false;

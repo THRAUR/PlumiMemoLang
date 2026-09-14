@@ -35,6 +35,11 @@ single file.
   It is stored in `data/settings.json` (gitignored) or `OPENROUTER_API_KEY`.
 - **Every AI call goes through `runTask()` in `server/ai/tasks.js`** so the model
   routing, the usage log and the cost estimate stay in one place.
+- **Only the models in `server/ai/models.js` may be called.** The OpenRouter key has a
+  guardrail allow-list, and any other model id comes back as 404 "not found". Settings
+  stores the order (`ai.priority`), `runTask()` walks it and falls back when a model
+  fails, and photo notes skip text-only models. Adding a model means adding it to that
+  file AND to the key's allow-list on openrouter.ai.
 - **Comments record why.** Keep them. Do not strip or reformat existing comments.
 - **Verify by loading, not just parsing:** `node --check` passes a missing import.
   Use `node --input-type=module -e "await import('./server/x.js')"` and run
@@ -61,6 +66,8 @@ npm start            # http://127.0.0.1:3080  (MEMOLANG_PORT / MEMOLANG_HOST / M
 npm test
 ```
 For a throwaway server while developing: `MEMOLANG_PORT=3097 DATA_DIR=/tmp/x node server/index.js`.
+To background it, keep the `&` inside parentheses: `(MEMOLANG_PORT=3097 DATA_DIR=/tmp/x nohup node server/index.js > /tmp/x.log 2>&1 & echo $! > /tmp/x.pid)`.
+Written as `cd dir && … &`, the PID you record belongs to a subshell, and killing it leaves node running on the port.
 Visual check of every screen with seeded data: `scripts/qa.sh 3098 /tmp/qa` (prints console errors, writes PNGs).
 Never `pkill -f` a pattern that appears in your own command line — kill by the PID `ss -ltnp` reports.
 
@@ -80,3 +87,19 @@ Never `pkill -f` a pattern that appears in your own command line — kill by the
   `ecosystem.config.cjs`). Its `filter_env` list is the second line of defence.
 - Dev servers, tests and `scripts/qa.sh` never touch `./data`: always pass a throwaway
   `DATA_DIR`.
+- **Big changes happen in a copy, not here.** The live app serves this folder directly, so a
+  half-written view is a broken phone. Work in `~/plumimemolang-staging` (an rsync of this
+  folder without `data/`, plus a data snapshot), and sync the code back only after `npm test`
+  and phone-size screenshots pass. Then restart the pm2 app if `server/` changed.
+
+## Documents
+
+- Reading PDFs needs poppler (`pdfinfo`, `pdftoppm`, `pdftotext`). Office files need
+  LibreOffice, probed per part on first use by `capabilities()` in `server/lib/documents.js`:
+  this machine has Impress (presentations convert) but not Writer (Word files do not).
+  The UI hides what the machine cannot do and says why; never assume a tool exists.
+- Every tool runs without a shell, with a timeout, an output cap and a minimal environment.
+  Keep it that way: a file name must never become a command, and the OpenRouter key must
+  never reach a child process.
+- Documents (`data/materials/`) are not in the backup file, on purpose: a scanned book can be
+  hundreds of megabytes.

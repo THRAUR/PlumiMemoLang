@@ -9,7 +9,8 @@ import { runTask, hasApiKey } from '../ai/tasks.js';
 import { createJob, setProgress } from '../jobs.js';
 import { DEFAULT_PROGRESS, deepMerge, isPlain } from '../defaults.js';
 import { addXp, bumpDay, getStats, readSettings } from '../stats.js';
-import { buildQuestions, countAnswers, makeRng, shuffled, QUESTION_TYPES, OPTION_IDS } from '../lib/challenge.js';
+import { buildQuestions, countAnswers, makeRng, shuffled, QUESTION_TYPES, OPTION_IDS, FOCI } from '../lib/challenge.js';
+import { learnerProfile } from '../../shared/goals.js';
 
 const r = Router();
 
@@ -47,6 +48,15 @@ r.post('/challenge/build', (req, res) => {
     if (wrong) throw bad(`"${wrong}" is not a question type (${QUESTION_TYPES.join(', ')}).`);
   }
   const s = readSettings();
+  // The client sends the focus it displays for; a caller that does not say gets the
+  // learner's own goals, so a speaking learner is never handed a character drill
+  // just because a request left the field out (§8.4).
+  let focus;
+  if (b.focus === undefined || b.focus === null || b.focus === '') focus = learnerProfile(s).focus;
+  else {
+    focus = String(b.focus);
+    if (!FOCI.includes(focus)) throw bad(`focus must be one of ${FOCI.join(', ')}.`);
+  }
   const seed = b.seed === undefined || b.seed === null ? null : String(b.seed);
 
   if (b.reading) {
@@ -80,8 +90,13 @@ r.post('/challenge/build', (req, res) => {
     return res.json({ jobId: job.id });
   }
 
-  const questions = buildQuestions(coll('words').all(), { size, lessonId, types, script: s.script, seed });
-  if (!questions.length) throw bad('Your words need meanings (and an example or two) before a challenge can be built.');
+  const questions = buildQuestions(coll('words').all(), { size, lessonId, types, focus, script: s.script, seed });
+  if (!questions.length) {
+    // A hand-picked list can fail where the full one would not (order-pinyin needs
+    // example sentences with pinyin), so say which lever to pull.
+    if (types?.length) throw bad('None of those question types fit your words yet. Pick a few more types.');
+    throw bad('Your words need meanings (and an example or two) before a challenge can be built.');
+  }
   const id = remember(newId(), questions);
   res.json({ id, questions });
 });

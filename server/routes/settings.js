@@ -3,28 +3,31 @@
 import { Router } from 'express';
 import { doc } from '../store.js';
 import { config } from '../config.js';
-import { runTask, TASKS, resolveApiKey, hasApiKey } from '../ai/tasks.js';
+import { runTask, resolveApiKey, hasApiKey } from '../ai/tasks.js';
+import { DEFAULT_PRIORITY, allowedModel, isAllowedModel, normalisePriority } from '../ai/models.js';
 import { listModels, maskKey } from '../openrouter.js';
 import { DEFAULT_SETTINGS, deepMerge, isPlain } from '../defaults.js';
 import { readSettings } from '../stats.js';
+import { SKILLS, REASONS, CLASSES, HANZI_MODES, TEMPLATE_FIELDS, normaliseTemplates } from '../../shared/goals.js';
 
 const r = Router();
 
 const SCRIPTS = ['zhuyin', 'pinyin', 'both'];
 const LEVELS = ['beginner', 'elementary', 'intermediate', 'advanced'];
 const THEMES = ['light', 'dark', 'system'];
-const TEMPLATE_FIELDS = ['hanzi', 'reading', 'meaning', 'example', 'audio', 'cloze', 'notes', 'tags'];
-const MODEL_KEYS = ['default', ...Object.keys(TASKS)];
 
 function bad(msg, status = 400) { return Object.assign(new Error(msg), { status }); }
 
 /* The shape every settings response has: no apiKey, but enough to tell the
-   learner whether one is set and where it came from. */
+   learner whether one is set and where it came from. The model order always
+   comes back complete and inside the allow-list, whatever the file holds. */
 function publicSettings(s) {
   const envKey = config.envApiKey;
   const key = String(s.ai?.apiKey || '');
   const out = { ...s, ai: { ...s.ai } };
   delete out.ai.apiKey;
+  delete out.ai.models;     // the per-task model map from before the allow-list; ignored
+  out.ai.priority = normalisePriority(s.ai?.priority);
   out.ai.apiKeyMasked = maskKey(key || envKey);
   out.ai.hasApiKey = Boolean(key || envKey);
   out.ai.keySource = key ? 'settings' : envKey ? 'env' : 'none';
@@ -70,6 +73,35 @@ function checkTemplates(list) {
   });
 }
 
+/* Only the keys that were sent are validated and returned: a partial goals body
+   (just `about`, say) must deep-merge without wiping the skills already stored. */
+function checkGoals(g) {
+  if (!isPlain(g)) throw bad('goals must be an object.');
+  const out = {};
+  const listOf = (value, allowed, name) => {
+    if (!Array.isArray(value)) throw bad(`goals.${name} must be a list.`);
+    const ids = allowed.map((x) => x.id);
+    for (const v of value) if (!ids.includes(v)) throw bad(`"${String(v)}" is not one of the ${name} (${ids.join(', ')}).`);
+    return [...new Set(value)];
+  };
+  if (g.skills !== undefined) out.skills = listOf(g.skills, SKILLS, 'skills');
+  if (g.reasons !== undefined) out.reasons = listOf(g.reasons, REASONS, 'reasons');
+  if (g.classes !== undefined) {
+    if (!CLASSES.some((c) => c.id === g.classes)) throw bad(`goals.classes must be one of ${CLASSES.map((c) => c.id).join(', ')}.`);
+    out.classes = g.classes;
+  }
+  if (g.about !== undefined) {
+    const about = String(g.about ?? '').trim();
+    if (about.length > 500) throw bad('Keep "anything Plumi should know" under 500 characters.');
+    out.about = about;
+  }
+  if (g.onboardedAt !== undefined) {
+    if (g.onboardedAt !== null && Number.isNaN(Date.parse(g.onboardedAt))) throw bad('goals.onboardedAt must be a date or null.');
+    out.onboardedAt = g.onboardedAt === null ? null : new Date(g.onboardedAt).toISOString();
+  }
+  return out;
+}
+
 /* Validates a partial body and returns the patch to deep-merge. Anything not
    mentioned here is dropped rather than stored, so a typo in the client cannot
    quietly grow the settings file. */
@@ -107,22 +139,33 @@ function validatePatch(body) {
     if (body.tts.voice !== undefined) p.tts.voice = String(body.tts.voice ?? '').trim();
     if (body.tts.rate !== undefined) p.tts.rate = checkNumber(body.tts.rate, 'tts.rate', 0.5, 2);
   }
-  if (body.cardTemplates !== undefined) p.cardTemplates = checkTemplates(body.cardTemplates);
+  if (body.cardTemplates !== undefined) p.cardTemplates = normaliseTemplates(checkTemplates(body.cardTemplates));
+  if (body.goals !== undefined) p.goals = checkGoals(body.goals);
+  if (body.display !== undefined) {
+    if (!isPlain(body.display)) throw bad('display must be an object.');
+    p.display = {};
+    if (body.display.hanzi !== undefined) {
+      if (!['', ...HANZI_MODES].includes(body.display.hanzi)) throw bad(`display.hanzi must be one of ${HANZI_MODES.join(', ')}, or "" to follow your goals.`);
+      p.display.hanzi = body.display.hanzi;
+    }
+  }
   if (body.ai !== undefined) {
     if (!isPlain(body.ai)) throw bad('ai must be an object.');
     p.ai = {};
     // "" clears the key, undefined leaves whatever is stored alone.
     if (body.ai.apiKey !== undefined) p.ai.apiKey = String(body.ai.apiKey ?? '').trim();
     if (body.ai.monthlyBudgetUsd !== undefined) p.ai.monthlyBudgetUsd = checkNumber(body.ai.monthlyBudgetUsd, 'ai.monthlyBudgetUsd', 0, 1e6);
-    if (body.ai.models !== undefined) {
-      if (!isPlain(body.ai.models)) throw bad('ai.models must be an object.');
-      p.ai.models = {};
-      for (const [k, v] of Object.entries(body.ai.models)) {
-        if (!MODEL_KEYS.includes(k)) throw bad(`"${k}" is not a model slot (${MODEL_KEYS.join(', ')}).`);
-        if (v !== null && v !== undefined && typeof v !== 'string') throw bad(`ai.models.${k} must be a model id string.`);
-        p.ai.models[k] = String(v ?? '').trim();
+    if (body.ai.priority !== undefined) {
+      if (!Array.isArray(body.ai.priority)) throw bad('ai.priority must be a list of model ids.');
+      for (const id of body.ai.priority) {
+        // The key's guardrail refuses anything else, so storing it would only
+        // turn into an error on the next lesson.
+        if (!isAllowedModel(id)) throw bad(`${String(id)} is not on the allowed model list.`);
       }
-      if (p.ai.models.default !== undefined && !p.ai.models.default) throw bad('Pick a default model.');
+      p.ai.priority = normalisePriority(body.ai.priority);
+    }
+    if (body.ai.models !== undefined) {
+      throw bad('Per-task models are gone. Reorder ai.priority instead.');
     }
   }
   return p;
@@ -136,29 +179,59 @@ r.put('/settings', (req, res) => {
   const patch = validatePatch(req.body);
   // Stored complete: the file stays readable and a later default change still
   // reaches it through readSettings().
-  const next = doc('settings').set((cur) => deepMerge(deepMerge(DEFAULT_SETTINGS, cur || {}), patch));
-  res.json(publicSettings(deepMerge(DEFAULT_SETTINGS, next)));
+  const next = doc('settings').set((cur) => {
+    const merged = deepMerge(deepMerge(DEFAULT_SETTINGS, cur || {}), patch);
+    // The first write after the allow-list landed drops the old per-task map.
+    merged.ai = { ...merged.ai };
+    delete merged.ai.models;
+    return merged;
+  });
+  // Answer through readSettings(), like GET: the reply must carry the normalised
+  // template list and goals, or an older settings file comes back with old names.
+  void next;
+  res.json(publicSettings(readSettings()));
 });
 
-/* The model list is public at OpenRouter, so this works before a key is set. */
+/* Only the allowed models, in the learner's order, with whatever the OpenRouter
+   catalog knows about each (prices, context). The catalog is public, so this
+   works before a key is set; if it cannot be reached, the static list still
+   renders and `inCatalog` is false. */
 r.get('/models', async (req, res) => {
   const s = readSettings();
   const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
-  // resolveApiKey() throws when nothing is set; the model list is public, so
-  // send whatever key exists and otherwise none.
-  const models = await listModels({ apiKey: hasApiKey(s) ? resolveApiKey(s) : '', refresh });
-  res.json(models);
+  let catalog = [];
+  try {
+    // resolveApiKey() throws when nothing is set; send a key only if one exists.
+    catalog = await listModels({ apiKey: hasApiKey(s) ? resolveApiKey(s) : '', refresh });
+  } catch {
+    catalog = [];
+  }
+  res.json(normalisePriority(s.ai?.priority).map((id, i) => {
+    const m = allowedModel(id);
+    const c = catalog.find((x) => x.id === id) || null;
+    return {
+      ...(c || {}),
+      id,
+      name: m.name,
+      vision: m.vision,
+      why: m.why,
+      rank: i + 1,
+      recommendedRank: DEFAULT_PRIORITY.indexOf(id) + 1,
+      inCatalog: Boolean(c),
+      inputModalities: c?.inputModalities || (m.vision ? ['text', 'image'] : ['text']),
+    };
+  }));
 });
 
 r.post('/ai/test', async (req, res) => {
   const s = readSettings();
   if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
   const model = String(req.body?.model ?? '').trim();
-  // runTask routes through settings.ai.models[taskId]; a one-off override is a
-  // settings clone, so nothing about the test is written to disk.
-  const settings = model ? deepMerge(s, { ai: { models: { test: model } } }) : s;
-  const out = await runTask('test', {}, { settings });
-  res.json({ ok: true, model: out.model, reply: out.result?.reply ?? '', usage: out.usage });
+  if (model && !isAllowedModel(model)) throw bad('That model is not on the allowed list.');
+  // With a model: exactly that one, no fallback, so a dead model shows as dead.
+  // Without: the whole list, the way every real task runs.
+  const out = await runTask('test', {}, { settings: s, prefer: model, only: Boolean(model) });
+  res.json({ ok: true, model: out.model, reply: out.result?.reply ?? '', usage: out.usage, fallbacks: out.fallbacks || [] });
 });
 
 export default r;

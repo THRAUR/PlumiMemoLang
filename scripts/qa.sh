@@ -14,8 +14,10 @@ PID=$!
 trap 'kill $PID 2>/dev/null' EXIT
 sleep 1.5
 node scripts/seed.mjs "http://127.0.0.1:$PORT" || echo "seed failed (routes missing?)"
-for route in today lessons review words challenge notes settings; do
-  for spec in "390,1400,m" "1200,1100,d"; do
+for route in welcome today lessons review words challenge notes settings; do
+  # 375x812 is the smallest phone the learner might use; 390x1400 shows more of a
+  # long screen in one shot; 1200x1100 is the laptop rail layout.
+  for spec in "375,812,s" "390,1400,m" "1200,1100,d"; do
     IFS=, read w h tag <<< "$spec"
     log="$OUT/$route-$tag.log"
     timeout 45 "$CH" --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=$w,$h \
