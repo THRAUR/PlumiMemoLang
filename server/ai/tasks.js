@@ -412,6 +412,15 @@ function knownSetOf(list) {
 
 /* ── words ───────────────────────────────────────────────────────────────── */
 
+/* `meaning` is already written in the explanation language (./prompts.js), so a
+   second meaning is kept only when it adds something: never for an English
+   learner, and not when the model copied the meaning into it. */
+function secondMeaning(value, meaning, english) {
+  const s = str(value);
+  if (english || !s) return '';
+  return s.toLowerCase() === str(meaning).toLowerCase() ? '' : s;
+}
+
 /* A WordDraft exactly as ARCHITECTURE §4.7 describes it: Word fields minus
    id/srs/stats, plus isKnown. Extra keys the model invented are dropped. */
 function normaliseWordDraft(raw, { knownSet, english }) {
@@ -419,12 +428,13 @@ function normaliseWordDraft(raw, { knownSet, english }) {
   const hanzi = str(raw.hanzi ?? raw.zh ?? raw.word ?? raw.characters);
   if (!hanzi) return null;                       // nothing to learn without characters
   const { pinyin, zhuyin } = readings(raw.pinyin, raw.zhuyin);
+  const meaning = str(raw.meaning ?? raw.english ?? raw.translation ?? raw.definition);
   return {
     hanzi,
     pinyin,
     zhuyin,
-    meaning: str(raw.meaning ?? raw.english ?? raw.translation ?? raw.definition),
-    meaningNative: english ? '' : str(raw.meaningNative ?? raw.native ?? raw.meaning_native),
+    meaning,
+    meaningNative: secondMeaning(raw.meaningNative ?? raw.native ?? raw.meaning_native, meaning, english),
     pos: oneOf(raw.pos ?? raw.partOfSpeech, POS, ''),
     type: oneOf(raw.type, WORD_TYPES, 'word'),
     examples: exampleList(raw.examples ?? raw.example),
@@ -574,7 +584,7 @@ function normalise(taskId, out, input, learner) {
       pinyin,
       zhuyin,
       meaning: str(json.meaning ?? json.english),
-      meaningNative: english ? '' : str(json.meaningNative),
+      meaningNative: secondMeaning(json.meaningNative, json.meaning ?? json.english, english),
       pos: oneOf(json.pos, POS, str(input?.word?.pos) || ''),
       type: oneOf(json.type, WORD_TYPES, str(input?.word?.type) || 'word'),
       examples: exampleList(json.examples ?? json.example),

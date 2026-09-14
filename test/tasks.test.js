@@ -648,3 +648,36 @@ test('photo notes reach a plan model as image blocks, and `only` tests one plan 
   assert.equal(hello.result.reply, '你好!(nǐ hǎo!)');
   assert.ok(!planCalls()[0].argv.includes('--json-schema'), 'the connection test asks for a sentence, not JSON');
 });
+
+/* ── the explanation language ────────────────────────────────────────────── */
+
+test('everything written for the learner follows "Explain things in", not English', async (t) => {
+  const { buildMessages } = await import('../server/ai/prompts.js');
+  const fr = { nativeLanguage: 'fr', level: 'beginner', script: 'pinyin', focus: 'speaking', goals: { skills: ['speak'] } };
+  const [system, user] = buildMessages('extract', { title: 'Class', text: '謝謝 xiè xie = thank you' }, fr);
+  assert.match(system.content, /The explanation language is French/);
+  assert.match(system.content, /Nothing written for the learner stays in English/);
+  assert.doesNotMatch(system.content, /titles: English/, 'the old always-English rule is gone');
+  assert.match(system.content, /They read pinyin and French/);
+  assert.match(user.content, /lesson\.title — French/);
+  assert.match(user.content, /meaning in French/);
+  assert.match(user.content, /meanings and explanations in English: write them in French instead/, 'English class notes are translated, not copied');
+  assert.match(buildMessages('explain', { word: { hanzi: '謝謝' }, question: 'why?' }, fr)[1].content, /Answer in French/);
+  const reading = buildMessages('reading', { words: [] }, fr)[1].content;
+  assert.match(reading, /passage\.translation: French/);
+  assert.match(reading, /questions in French/);
+  const suggest = buildMessages('suggest', { known: [] }, fr)[1].content;
+  assert.match(suggest, /meaning in French/);
+  assert.match(suggest, /a translation in French/);
+
+  const en = buildMessages('extract', { title: 'Class', text: '謝謝' }, { nativeLanguage: 'en' });
+  assert.match(en[0].content, /The explanation language is English/);
+  assert.doesNotMatch(en[0].content, /Nothing written for the learner stays in English/);
+  assert.doesNotMatch(en[1].content, /write them in English instead/);
+
+  // A model that copies the meaning into meaningNative anyway is not shown twice.
+  stubFetch(t, completion({ pinyin: 'xiè xie', meaning: 'merci', meaningNative: ' Merci ', examples: [] }, { model: DS }));
+  const enrich = await runTask('enrich', { word: { hanzi: '謝謝' } }, { settings: SETTINGS });
+  assert.equal(enrich.result.meaning, 'merci');
+  assert.equal(enrich.result.meaningNative, '', 'a copy of the meaning is dropped');
+});

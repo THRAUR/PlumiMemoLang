@@ -56,8 +56,9 @@ function openWordWindow({ lessonId, onSaved }) {
     try { const z = pinyinToZhuyin(pinyinInput.value.trim()); if (z) zhuyinInput.value = z; }
     catch { /* shared/zhuyin.js may still be a stub; leave the field alone */ }
   });
-  const meaningInput = h('input', { class: 'input', placeholder: 'thank you' });
-  const meaningNativeInput = h('input', { class: 'input', placeholder: `Meaning in ${nativeLabel()}` });
+  // The meaning is written in the explanation language (Settings → Explain things in).
+  const meaningInput = h('input', { class: 'input', placeholder: `Meaning in ${nativeLabel()}` });
+  const meaningNativeInput = h('input', { class: 'input', placeholder: 'Second meaning (optional)' });
   const posSelect = h('select', { class: 'select' }, ...POS.map(([v, label]) => h('option', { value: v }, label)));
   const typeSelect = h('select', { class: 'select' }, ...TYPES.map(([v, label]) => h('option', { value: v, selected: v === 'word' }, label)));
   const tagsInput = h('input', { class: 'input', placeholder: 'greeting, polite' });
@@ -73,7 +74,7 @@ function openWordWindow({ lessonId, onSaved }) {
   const exampleReadingRow = h('div', { class: 'grid-2' }, field('Example pinyin', exPinyin), field('Example translation', exTr));
   const middleFields = [
     field('Meaning', meaningInput),
-    field(`Meaning in ${nativeLabel()}`, meaningNativeInput),
+    field('Second meaning (optional)', meaningNativeInput),
     h('div', { class: 'grid-2' }, field('Part of speech', posSelect), field('Type', typeSelect)),
     field('Tags', tagsInput, 'Comma separated'),
     field('Notes', notesInput),

@@ -54,8 +54,8 @@ Plumi, the pixel bird, is the coach: it greets, reacts to answers, celebrates.
   hanzi: "謝謝",            // Traditional characters, the unique key (trimmed)
   pinyin: "xiè xie",       // tone MARKS, one space per syllable
   zhuyin: "ㄒㄧㄝˋ ˙ㄒㄧㄝ",  // one space per syllable; neutral tone ˙ goes FIRST
-  meaning: "thank you",    // in English (the app's working language)
-  meaningNative: "merci",  // in settings.nativeLanguage, optional
+  meaning: "thank you",    // in the explanation language, settings.nativeLanguage (English by default; see §9.7)
+  meaningNative: "",       // an optional second meaning the learner adds; the AI leaves it empty
   pos: "v",                // n | v | adj | adv | mw (measure word) | conj | prep | part | interj | pron | num | expr | ""
   type: "word",            // character | word | phrase | sentence | grammar
   examples: [ { zh: "謝謝你的幫忙。", pinyin: "xiè xie nǐ de bāng máng", zhuyin: "…", translation: "Thanks for your help." } ],
@@ -852,3 +852,21 @@ flushed before the reply. The Claude login is never touched.
 its behaviour from `$HOME/fake-claude.json` and logs each run to
 `$HOME/fake-claude-calls.jsonl`. `npm test` runs `test/*.test.js` only: the runner's default
 pattern also runs every `.mjs` file under `test/`, and the fake would wait on stdin forever.
+
+### 9.7 The explanation language
+
+A learner who picked French under "Explain things in" regenerated their lessons with Claude and
+got English: the prompts wrote every meaning, translation and explanation in English, and only
+`meaningNative` followed the setting. Now `settings.nativeLanguage` is the explanation language
+for everything the AI writes for the learner:
+
+- `meaning`, every `translation`, a lesson's `title`, `summary`, section titles and bodies, grammar
+  `explanation`, word `notes` and `tags`, a suggestion's `why`, the reading's title, translation,
+  questions and options, and the answer to a question about a word.
+- The system prompt names the language and each task message repeats it; explanations the notes
+  give in English are translated, not copied. The schemas stay static and say "in the
+  explanation language".
+- The AI leaves `meaningNative` empty, and the editors label it "Second meaning (optional)".
+  `runTask()` drops a `meaningNative` that only repeats `meaning`.
+- Content generated earlier stays as it was: importing merges into existing words and only fills
+  empty fields, so re-importing a note does not translate a stored meaning.

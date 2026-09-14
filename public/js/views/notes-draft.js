@@ -135,8 +135,9 @@ function wordEditor(word, onSave) {
     body: h('div', { class: 'stack' },
       speaking ? readings : hanzi,
       speaking ? hanzi : readings,
-      field('meaning', 'Meaning (English)'),
-      field('meaningNative', 'Meaning (your language)'),
+      // The meaning is written in the explanation language (Settings → Explain things in).
+      field('meaning', 'Meaning'),
+      field('meaningNative', 'Second meaning (optional)'),
       h('div', { class: 'grid-2' }, pick('pos', 'Part of speech', POS), pick('type', 'Type', TYPES)),
       examples.length ? h('div', { class: 'stack nt-editor-examples' }, h('p', { class: 'pl-eyebrow' }, 'Examples'), examples) : null),
     actions: [

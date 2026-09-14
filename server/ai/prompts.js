@@ -10,6 +10,13 @@
      - JSON only. The schema is enforced when the model supports it, but half of
        OpenRouter's catalogue does not, so the prompt has to ask as well.
 
+   Everything written FOR the learner (meanings, translations, titles, summaries,
+   explanations, notes, reasons, questions) is in the language they picked under
+   "Explain things in" (settings.nativeLanguage). Until 2026-09-14 those were always
+   English and only meaningNative followed the setting, so a learner who picked
+   French got English lessons. The schemas stay static: they say "in the explanation
+   language", and the system prompt names that language.
+
    Token budget matters too: the learner pays per token. Notes are capped, the
    known-word list is sent as bare hanzi, and `suggest`/`reading` never see a
    full Word object. */
@@ -58,7 +65,7 @@ function levelLine(level) {
    test, which wants one plain sentence. */
 export function systemPrompt(learner = {}, { json = true } = {}) {
   const { nativeLanguage = 'en', level = 'beginner', script = 'zhuyin' } = learner || {};
-  const native = languageName(nativeLanguage);
+  const lang = languageName(nativeLanguage);
   const lines = [
     'You are an expert Mandarin teacher writing study material for one adult learner who takes Traditional Chinese classes in Taiwan.',
     '',
@@ -68,10 +75,9 @@ export function systemPrompt(learner = {}, { json = true } = {}) {
     '- pinyin: lowercase, tone MARKS, exactly one space between syllables — "xiè xie", never "xie4xie5", never "xièxie".',
     '- zhuyin (注音): one space between syllables, one syllable per Chinese character, tone symbols ˊ ˇ ˋ AFTER the syllable, the neutral tone ˙ BEFORE it, tone 1 unmarked. 謝謝 → "ㄒㄧㄝˋ ˙ㄒㄧㄝ". 你好 → "ㄋㄧˇ ㄏㄠˇ". 東西 → "ㄉㄨㄥ ˙ㄒㄧ".',
     '- Give BOTH readings for every Chinese string you write: words, example sentences, dialogue lines, passages.',
-    `- Explanations, meanings, grammar notes and titles: English. The learner reads readings as ${script === 'pinyin' ? 'pinyin' : script === 'both' ? 'zhuyin and pinyin' : 'zhuyin'}, so never skip them.`,
-    isEnglish(nativeLanguage)
-      ? '- Leave every "meaningNative" field as an empty string (the learner works in English).'
-      : `- "meaningNative" is the same meaning written in ${native}. Keep it short, no explanation.`,
+    `- The explanation language is ${lang}. Write every meaning, translation, title, summary, section, grammar explanation, note, tip, reason, question and answer in ${lang}, even when the material you are given explains things in English or another language: translate those explanations, do not copy them.${isEnglish(nativeLanguage) ? '' : ` Nothing written for the learner stays in English.`}`,
+    `- The learner reads readings as ${script === 'pinyin' ? 'pinyin' : script === 'both' ? 'zhuyin and pinyin' : 'zhuyin'}, so never skip them.`,
+    '- Leave every "meaningNative" field as an empty string: "meaning" is already in the explanation language.',
     `- The learner's level is ${levelLine(level)}. Keep example sentences inside that range.`,
     ...goalLines(learner),
     '- Never invent a reading, a character or a usage you are unsure of; choose a simpler word you are sure about instead.',
@@ -87,6 +93,7 @@ export function systemPrompt(learner = {}, { json = true } = {}) {
    wants to SPEAK needs phrases they can say, not character trivia. */
 function goalLines(learner) {
   const g = learner?.goals || {};
+  const lang = languageName(learner?.nativeLanguage);
   const lines = [];
   const skillWords = { speak: 'speak', listen: 'understand spoken Chinese', read: 'read characters', write: 'write characters', type: 'type Chinese' };
   const skills = (g.skills || []).filter((id) => SKILLS.some((x) => x.id === id)).map((id) => skillWords[id]);
@@ -98,7 +105,7 @@ function goalLines(learner) {
   if (about) lines.push(`- In their own words: "${about}"`);
   if (learner?.focus === 'speaking') {
     lines.push(
-      '- FOCUS: SPEAKING AND LISTENING. They read pinyin and English; characters are only a reference to check the original meaning.',
+      `- FOCUS: SPEAKING AND LISTENING. They read pinyin and ${lang}; characters are only a reference to check the original meaning.`,
       '  Prefer phrases and sentence patterns they can say today over single characters, natural spoken Taiwanese Mandarin,',
       '  and example sentences short enough to repeat aloud (at most about 14 syllables). Add pronunciation notes where they help',
       '  (tones, tone sandhi of 一, 不 and third tones, common Taiwan pronunciations). No stroke order, radicals or character trivia.',
@@ -141,7 +148,7 @@ const EXAMPLE = {
     zh: { type: 'string', description: 'Traditional characters' },
     pinyin: { type: 'string', description: 'tone marks, one space per syllable' },
     zhuyin: { type: 'string', description: 'one space per syllable, ˙ before a neutral syllable' },
-    translation: { type: 'string', description: 'English' },
+    translation: { type: 'string', description: 'in the explanation language' },
   },
 };
 
@@ -151,13 +158,13 @@ const WORD_DRAFT = {
     hanzi: { type: 'string', description: 'Traditional characters only' },
     pinyin: { type: 'string' },
     zhuyin: { type: 'string' },
-    meaning: { type: 'string', description: 'English, short' },
-    meaningNative: { type: 'string', description: "the learner's language, or empty" },
+    meaning: { type: 'string', description: 'in the explanation language, short' },
+    meaningNative: { type: 'string', description: 'leave empty' },
     pos: { type: 'string', enum: POS },
     type: { type: 'string', enum: WORD_TYPES },
     examples: { type: 'array', description: '1–2 short sentences', items: EXAMPLE },
-    notes: { type: 'string', description: 'usage or nuance, one or two sentences, or empty' },
-    tags: { type: 'array', description: 'lowercase English topic tags', items: { type: 'string' } },
+    notes: { type: 'string', description: 'usage or nuance in the explanation language, one or two sentences, or empty' },
+    tags: { type: 'array', description: 'lowercase topic tags in the explanation language', items: { type: 'string' } },
     isKnown: { type: 'boolean', description: 'true when the hanzi appears in the known list' },
   },
 };
@@ -165,9 +172,9 @@ const WORD_DRAFT = {
 const LESSON = {
   type: 'object',
   properties: {
-    title: { type: 'string', description: 'English, ≤ 6 words' },
+    title: { type: 'string', description: 'in the explanation language, ≤ 6 words' },
     titleZh: { type: 'string', description: 'Traditional characters, ≤ 8 characters' },
-    summary: { type: 'string', description: '2–4 sentences, English' },
+    summary: { type: 'string', description: '2–4 sentences, in the explanation language' },
     sections: {
       type: 'array',
       description: '2–6 cards in reading order',
@@ -175,9 +182,9 @@ const LESSON = {
         type: 'object',
         properties: {
           kind: { type: 'string', enum: SECTION_KINDS },
-          title: { type: 'string' },
+          title: { type: 'string', description: 'in the explanation language' },
           titleZh: { type: 'string' },
-          body: { type: 'string', description: "plain text or light markdown (**bold**, lines starting with '- ')" },
+          body: { type: 'string', description: "in the explanation language: plain text or light markdown (**bold**, lines starting with '- ')" },
         },
       },
     },
@@ -187,7 +194,7 @@ const LESSON = {
         type: 'object',
         properties: {
           pattern: { type: 'string', description: 'e.g. "A 比 B + adj"' },
-          explanation: { type: 'string', description: 'English, 1–3 sentences' },
+          explanation: { type: 'string', description: 'in the explanation language, 1–3 sentences' },
           examples: { type: 'array', description: 'exactly 2', items: EXAMPLE },
         },
       },
@@ -202,7 +209,7 @@ const LESSON = {
           zh: { type: 'string' },
           pinyin: { type: 'string' },
           zhuyin: { type: 'string' },
-          translation: { type: 'string' },
+          translation: { type: 'string', description: 'in the explanation language' },
         },
       },
     },
@@ -238,10 +245,10 @@ export const SCHEMAS = {
             hanzi: { type: 'string' },
             pinyin: { type: 'string' },
             zhuyin: { type: 'string' },
-            meaning: { type: 'string' },
-            meaningNative: { type: 'string' },
+            meaning: { type: 'string', description: 'in the explanation language' },
+            meaningNative: { type: 'string', description: 'leave empty' },
             pos: { type: 'string', enum: POS },
-            why: { type: 'string', description: 'one sentence: why this word, now' },
+            why: { type: 'string', description: 'one sentence in the explanation language: why this word, now' },
             example: EXAMPLE,
             tags: { type: 'array', items: { type: 'string' } },
           },
@@ -255,33 +262,33 @@ export const SCHEMAS = {
     properties: {
       pinyin: { type: 'string' },
       zhuyin: { type: 'string' },
-      meaning: { type: 'string' },
-      meaningNative: { type: 'string' },
+      meaning: { type: 'string', description: 'in the explanation language' },
+      meaningNative: { type: 'string', description: 'leave empty' },
       pos: { type: 'string', enum: POS },
       type: { type: 'string', enum: WORD_TYPES },
       examples: { type: 'array', description: '1–2 short sentences', items: EXAMPLE },
-      notes: { type: 'string' },
+      notes: { type: 'string', description: 'in the explanation language' },
     },
   },
 
   explain: {
     type: 'object',
     properties: {
-      answer: { type: 'string', description: '≤ 200 words, light markdown' },
+      answer: { type: 'string', description: '≤ 200 words, light markdown, in the explanation language' },
     },
   },
 
   reading: {
     type: 'object',
     properties: {
-      title: { type: 'string', description: 'English, ≤ 6 words' },
+      title: { type: 'string', description: 'in the explanation language, ≤ 6 words' },
       passage: {
         type: 'object',
         properties: {
           zh: { type: 'string', description: '60–120 Traditional characters' },
           pinyin: { type: 'string' },
           zhuyin: { type: 'string' },
-          translation: { type: 'string', description: 'English' },
+          translation: { type: 'string', description: 'in the explanation language' },
         },
       },
       questions: {
@@ -290,8 +297,8 @@ export const SCHEMAS = {
         items: {
           type: 'object',
           properties: {
-            q: { type: 'string', description: 'English question about the passage' },
-            options: { type: 'array', description: 'exactly 4 short options', items: { type: 'string' } },
+            q: { type: 'string', description: 'a question about the passage, in the explanation language' },
+            options: { type: 'array', description: 'exactly 4 short options, in the explanation language', items: { type: 'string' } },
             answerIndex: { type: 'integer', description: '0-based index of the correct option' },
           },
         },
@@ -331,6 +338,7 @@ function extractMessage(input, learner) {
   const pages = Array.isArray(input?.pages) ? input.pages : [];
   const isDocument = pages.length > 0;
   const sourceTitle = String(input?.source?.title || '').trim();
+  const lang = languageName(learner.nativeLanguage);
 
   const images = (Array.isArray(input?.images) ? input.images : [])
     .map((im) => (typeof im === 'string' ? im : im?.dataUrl || im?.url || ''))
@@ -347,7 +355,7 @@ function extractMessage(input, learner) {
     `Class date: ${classDate || '(unknown)'}`,
     `Learner level: ${levelLine(learner.level)}`,
     `Reading the learner studies with: ${learner.script}`,
-    `Learner's language for meaningNative: ${isEnglish(learner.nativeLanguage) ? 'English — leave meaningNative empty' : languageName(learner.nativeLanguage)}`,
+    `Explanation language: ${lang}. Meanings, translations, titles, summaries, sections, grammar explanations and notes are all written in ${lang}.`,
     '',
     splitRule(input),
     '',
@@ -391,17 +399,20 @@ function extractMessage(input, learner) {
     'Set "isKnown": true for any word from that list. Still include such a word when a lesson genuinely needs it (a grammar pattern, a dialogue line); do not pad the list with words the material never mentions.',
     '',
     'Answer { "lessons": [ { "lesson": { … }, "words": [ … ] } ] }. For EACH lesson:',
-    '1. lesson.title — English, ≤ 6 words — and lesson.titleZh in Traditional characters.',
-    '2. lesson.summary — 2–4 sentences: what it covers and what the learner should be able to do afterwards.',
-    '3. lesson.sections — 2 to 6 cards, kind ∈ vocab | grammar | dialogue | culture | tip | text, in reading order. Body is plain text or light markdown ("- " bullets, **bold**). This is where explanations go.',
-    '4. lesson.grammar — every pattern the lesson touches, each with a short English explanation and exactly 2 examples (zh + pinyin + zhuyin + translation).',
-    '5. lesson.dialogue — 4 to 8 lines of natural spoken Taiwanese Mandarin reusing the lesson\'s words when the material has or suggests a conversation; otherwise [].',
-    '6. words — 6 to 40 entries: every vocabulary item of that lesson, plus the obvious siblings a teacher would expect, no filler. type ∈ character | word | phrase | sentence | grammar. Each entry: hanzi, pinyin, zhuyin, meaning, meaningNative, pos, 1–2 examples, tags, isKnown.',
+    `1. lesson.title — ${lang}, ≤ 6 words — and lesson.titleZh in Traditional characters.`,
+    `2. lesson.summary — 2–4 sentences in ${lang}: what it covers and what the learner should be able to do afterwards.`,
+    `3. lesson.sections — 2 to 6 cards, kind ∈ vocab | grammar | dialogue | culture | tip | text, in reading order, titles and bodies in ${lang}. Body is plain text or light markdown ("- " bullets, **bold**). This is where explanations go.`,
+    `4. lesson.grammar — every pattern the lesson touches, each with a short ${lang} explanation and exactly 2 examples (zh + pinyin + zhuyin + ${lang} translation).`,
+    `5. lesson.dialogue — 4 to 8 lines of natural spoken Taiwanese Mandarin reusing the lesson's words, each with its ${lang} translation, when the material has or suggests a conversation; otherwise [].`,
+    `6. words — 6 to 40 entries: every vocabulary item of that lesson, plus the obvious siblings a teacher would expect, no filler. type ∈ character | word | phrase | sentence | grammar. Each entry: hanzi, pinyin, zhuyin, meaning in ${lang}, meaningNative left empty, pos, 1–2 examples with ${lang} translations, notes in ${lang}, tags, isKnown.`,
     '',
     learner.focus === 'speaking'
       ? 'This learner is learning to SPEAK: prefer words, phrases and whole sentences people actually say; list a single character only when it is a word on its own; keep examples short enough to say aloud.'
       : 'Prefer the words the material actually contains over words you would have chosen.',
     'If something is ambiguous, follow the more common Taiwan usage and say so in notes.',
+    isEnglish(learner.nativeLanguage)
+      ? ''
+      : `The notes may give meanings and explanations in English: write them in ${lang} instead.`,
   );
 
   const content = [{ type: 'text', text: parts.join('\n') }];
@@ -412,6 +423,7 @@ function extractMessage(input, learner) {
 function suggestMessage(input, learner) {
   const count = Math.max(1, Math.min(20, Number(input?.count) || 5));
   const topics = cleanList(input?.recentTopics, 8);
+  const lang = languageName(learner.nativeLanguage);
   const parts = [
     `Propose ${count} new Traditional Chinese words for this learner to study today.`,
     '',
@@ -424,7 +436,7 @@ function suggestMessage(input, learner) {
     '- High-frequency and immediately useful in Taiwan: something the learner could say or read this week.',
     '- Thematically close to the recent topics, so today\'s words reinforce the last class.',
     `- None of them may appear in the known list${count > 1 ? ', and no duplicates among them' : ''}.`,
-    '- Each item: hanzi, pinyin, zhuyin, meaning, meaningNative, pos, why (one sentence, concrete), one short example sentence with pinyin, zhuyin and translation, and 1–3 tags.',
+    `- Each item: hanzi, pinyin, zhuyin, meaning in ${lang}, meaningNative left empty, pos, why (one concrete sentence in ${lang}), one short example sentence with pinyin, zhuyin and a translation in ${lang}, and 1–3 tags.`,
   ];
   if (learner.focus === 'speaking') {
     parts.push('- This learner is learning to SPEAK: suggest words and short phrases people say out loud in daily life in Taiwan, not literary or written-only words. Put the most useful one first.');
@@ -434,6 +446,7 @@ function suggestMessage(input, learner) {
 
 function enrichMessage(input, learner) {
   const w = input?.word || {};
+  const lang = languageName(learner.nativeLanguage);
   const compact = {
     hanzi: String(w.hanzi || '').trim(),
     pinyin: String(w.pinyin || '').trim(),
@@ -452,7 +465,7 @@ function enrichMessage(input, learner) {
     '',
     `Learner level: ${levelLine(learner.level)}`,
     'Fill every field: keep what is already correct, replace what is wrong, and write what is missing.',
-    'Return pinyin, zhuyin, meaning, meaningNative, pos, type, examples (1–2 short sentences with zh, pinyin, zhuyin, translation) and notes (usage, register, Taiwan-specific nuance, or "").',
+    `Return pinyin, zhuyin, meaning (in ${lang}), meaningNative (empty), pos, type, examples (1–2 short sentences with zh, pinyin, zhuyin and a translation in ${lang}) and notes in ${lang} (usage, register, Taiwan-specific nuance, or "").`,
   ];
   return [{ role: 'user', content: parts.join('\n') }];
 }
@@ -460,6 +473,7 @@ function enrichMessage(input, learner) {
 function explainMessage(input, learner) {
   const w = input?.word || {};
   const question = String(input?.question || '').trim();
+  const lang = languageName(learner.nativeLanguage);
   const parts = [
     'Answer the learner\'s question about one word.',
     '',
@@ -468,7 +482,7 @@ function explainMessage(input, learner) {
     '',
     `Question: ${question || 'Explain this word: when do I use it, and what do learners get wrong?'}`,
     '',
-    `Answer in English${isEnglish(learner.nativeLanguage) ? '' : ` (a ${languageName(learner.nativeLanguage)} gloss in brackets is welcome)`}, 200 words maximum.`,
+    `Answer in ${lang}, 200 words maximum, whatever language the question is asked in.`,
     'Light markdown only: **bold**, "- " bullets. Every Chinese string you write gets pinyin with tone marks in brackets.',
     'Be concrete: contrast with the word the learner would confuse it with, and give one example sentence at their level.',
     `Learner level: ${levelLine(learner.level)}`,
@@ -477,6 +491,7 @@ function explainMessage(input, learner) {
 }
 
 function readingMessage(input, learner) {
+  const lang = languageName(learner.nativeLanguage);
   // Only hanzi + meaning: a full Word object would triple the prompt for no gain.
   const words = (Array.isArray(input?.words) ? input.words : [])
     .map((w) => ({ hanzi: String(w?.hanzi || '').trim(), meaning: String(w?.meaning || '').trim() }))
@@ -492,9 +507,9 @@ function readingMessage(input, learner) {
     'Requirements:',
     '- passage.zh: 60–120 Traditional characters, one small everyday scene with a beginning and an end. Natural spoken Taiwanese Mandarin.',
     '- passage.pinyin and passage.zhuyin: the whole passage, one space per syllable, punctuation kept.',
-    '- passage.translation: English.',
-    '- questions: 3 or 4 comprehension questions in English, each with exactly 4 short options and answerIndex (0-based) pointing at the correct one. Wrong options must be plausible but clearly wrong to someone who understood the passage.',
-    '- title: English, ≤ 6 words.',
+    `- passage.translation: ${lang}.`,
+    `- questions: 3 or 4 comprehension questions in ${lang}, each with exactly 4 short options in ${lang} and answerIndex (0-based) pointing at the correct one. Wrong options must be plausible but clearly wrong to someone who understood the passage.`,
+    `- title: ${lang}, ≤ 6 words.`,
   ];
   if (learner.focus === 'speaking') {
     parts.push('- This learner is learning to SPEAK and LISTEN: write the passage as a short spoken exchange between two people (label the speakers), in words people really say.');
