@@ -19,10 +19,10 @@ Taiwan usage throughout: 繁體字 with 注音 first, pinyin second.
 | **Review** | Spaced-repetition memo cards (SM-2 style). Card types follow your goals: "Say it" (read the English, say it aloud, record yourself and compare), listening and pinyin cards for speaking; character cards for reading and writing; and your own templates. |
 | **Words** | Everything you have learned, searchable by 字, pinyin (tones optional), 注音 or meaning, with a 0–100 memorization score and a band: 生 new · 認 seen · 熟 familiar · 通 mastered. |
 | **Challenge** | A mixed quiz built from your own words. For speaking: listen and pick the meaning, pick the pinyin, hear the tones, build the sentence from pinyin, and say it. For characters: pick the characters, fill the blank, build the sentence from characters. Plus an optional AI-written reading. |
-| **Settings** | Your goals, 注音 or pinyin and how big characters are, the OpenRouter key and the order the allowed models are tried in, explanation language, theme, voice, card templates, backup. |
+| **Settings** | Your goals, 注音 or pinyin and how big characters are, the AI (your own Claude plan, the OpenRouter key, and one order for every model), explanation language, theme, voice, card templates, backup, and deleting your data. |
 
 Everything stays on your machine. Your notes leave it only when you ask for a
-lesson, and only to the model you picked on OpenRouter.
+lesson, and only to the AI you connected: your own Claude plan, or a model on OpenRouter.
 
 ## Run it
 
@@ -35,9 +35,11 @@ npm install
 npm start
 ```
 
-Open http://127.0.0.1:3080. Then, in **Settings → AI**, paste an
-[OpenRouter key](https://openrouter.ai/keys) and pick a model. Photo notes need a
-model that accepts images; the picker marks them.
+Open http://127.0.0.1:3080. Then connect an AI in **Settings → AI**: switch on your
+Claude plan if [Claude Code](https://claude.com/claude-code) is installed and logged in
+on this machine (the calls are included in your subscription), paste an
+[OpenRouter key](https://openrouter.ai/keys), or both. Photo notes need a model that
+accepts images; the model list marks them.
 
 ### On your phone
 
@@ -73,6 +75,7 @@ Copy `.env.example` to `.env`. Every value is optional.
 | `MEMOLANG_PORT` | `3080` | Port to listen on (`PORT` is honoured as a fallback). |
 | `MEMOLANG_HOST` | `127.0.0.1` | Interface to bind. The generic `HOST` variable is ignored on purpose. |
 | `MEMOLANG_DATA_DIR` | `./data` | Where your data lives. Back up this folder, or use Settings → Data. |
+| `MEMOLANG_CLAUDE_BIN` | found by itself | The `claude` command for your Claude plan, if it is not in `~/.local/bin`, `~/.claude/local` or on `PATH`. |
 
 ## Learning to speak first
 
@@ -109,6 +112,24 @@ tried in order: when one fails, Plumi moves down to the next, so a lesson still 
 written when a model is down or rate-limited. Reorder them and test each one in
 Settings.
 
+### Your own Claude plan
+
+If [Claude Code](https://claude.com/claude-code) is installed and logged in on the machine
+the app runs on, Settings → AI shows your plan (Pro, Max…) and lets you switch on Claude
+Sonnet, Opus or Haiku. Their calls go through Claude Code, so they are included in your
+subscription and cost no OpenRouter credits. They do count toward your plan's usage
+limits, the same ones your own Claude chats and Claude Code use; Settings shows how much
+of the 5-hour window is used. A plan model you switch on goes to the top of the model
+order, so OpenRouter only answers when the plan cannot (a usage limit, a logged-out
+Claude Code), and only if you saved a key.
+
+- Sonnet is the fit for this app. Opus is the most careful and uses your limits fastest;
+  Haiku is the fastest.
+- Plumi runs Claude Code as a plain model: no tools, plugins or MCP servers, no saved
+  sessions, and low effort, so a short class note becomes a lesson in under a minute.
+- Under pm2 or another service the app still finds `claude` in `~/.local/bin`; set
+  `MEMOLANG_CLAUDE_BIN` in `.env` if yours lives somewhere else.
+
 | Order | Model | Why it sits there |
 |---|---|---|
 | 1 | Gemini 3.5 Flash Lite | Newest of the four and the safest for Traditional characters, Taiwan vocabulary and 注音. Reads photos. |
@@ -128,8 +149,20 @@ Every call has a task name attached:
 
 Each call is logged with its token counts and cost (OpenRouter reports the
 price); Settings shows today's and this month's spend against a budget you set.
-Prompts are kept compact: the model only ever sees the characters you already
-know, never your whole dictionary.
+A call your Claude plan answered is logged as included: it costs nothing here, and
+Settings shows what it would have cost at API prices. Prompts are kept compact: the
+model only ever sees the characters you already know, never your whole dictionary.
+
+## Deleting your data
+
+Settings → Delete data lists what the app holds: lessons, words, class notes,
+documents, XP and streak, word suggestions, the AI usage log, your goals, your personal
+info, your settings and the OpenRouter key. Each has its own Delete, and each
+confirmation says what goes and what stays: delete your lessons and your words stay in
+the dictionary; delete your words and your lessons stay, without their word lists.
+"Delete everything" asks you to type DELETE, then takes the data folder back to a fresh
+install and opens the welcome questions. Nothing deleted can be brought back, so every
+confirmation offers the backup first. Your Claude login is never touched.
 
 ## The memorization score
 

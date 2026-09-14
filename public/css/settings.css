@@ -131,3 +131,26 @@
 .st-databtns .btn { flex: 1; min-width: 160px; }
 .st-where { word-break: break-word; }
 .st-where .mono { font-size: 12px; color: var(--muted); }
+
+/* ---------- your Claude plan ---------- */
+.st-planstate { gap: 8px; min-height: 24px; }
+.st-planstate .btn { margin-left: auto; }
+.st-planuse { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.st-planlist .list-row { flex: none; }
+.st-planrow { align-items: flex-start; gap: 12px; padding: 10px 12px; }
+.st-planrow input { flex: none; margin-top: 3px; }
+.st-planrow-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.st-planrow input:disabled + .st-planrow-main { opacity: .6; }
+.st-usage-cost.pl-tag { flex: none; margin-top: 2px; }
+
+/* ---------- delete data ----------
+   The rows stay ink and hairline. Brick is a state, not decoration: it only
+   appears on the button that confirms a deletion, inside its window. */
+.st-erase .list-row { flex: none; }
+.st-erase-row { align-items: center; gap: 12px; padding: 10px 8px 10px 12px; }
+.st-erase-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.st-erase-what { font-size: 13px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
+.st-erase-row > .btn { flex: none; }
+.st-erase-foot { gap: 10px 14px; }
+.st-erase-foot .help { flex: 1 1 180px; min-width: 0; }
+.st-erase-confirm > .btn { align-self: flex-start; }

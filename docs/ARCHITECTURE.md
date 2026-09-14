@@ -724,3 +724,131 @@ button.
   welcome flow can preview an unsaved choice without building a stripped-down word.
 - Speech recognition may answer in Simplified characters, which lowers `hanziMatch()`;
   it only advises, so the learner still decides.
+
+## 9. Your own Claude plan, and deleting data (2026-09-14)
+
+The learner asked for two things:
+
+1. To use their own subscription model locally, "like Claude", so AI work costs nothing
+   beyond the subscription they already pay for.
+2. A way to delete their data (lessons, words, notes, settings, personal info and goals),
+   one part at a time or everything at once.
+
+This section is binding like §1–§8.
+
+### 9.1 Models and the order
+
+`server/ai/models.js` lists two kinds of model:
+
+| ids | provider | how it is paid |
+|---|---|---|
+| the four OpenRouter ids (§7) | `openrouter` | per call, with the key; always in the order |
+| `claude-code:sonnet` · `claude-code:opus` · `claude-code:haiku` | `claude-code` | included in the learner's Claude plan, through Claude Code on this computer; opt-in |
+
+`settings.ai.priority` holds both. `normalisePriority()` keeps the learner's order, appends
+any OpenRouter model missing from it, and never appends a plan model: a plan model is on
+the list only where the learner put it. Every plan model reads photos. New exports:
+`PLAN_MODELS`, `PLAN_IDS`, `PROVIDERS`, `planModel(id)`, `isPlanModel(id)`, `providerOf(id)`.
+`DEFAULT_PRIORITY` stays the four OpenRouter ids.
+
+### 9.2 `server/ai/claude-code.js`
+
+```js
+export class ClaudeCodeError extends Error   // .provider = 'claude-code', .scope = 'model' | 'provider' | 'stop', .code
+export function findClaude() → path | ''     // only MEMOLANG_CLAUDE_BIN when set; else ~/.local/bin/claude, ~/.claude/local/claude, PATH
+export async function claudeStatus({ refresh }) → { installed, version, loggedIn, authMethod, plan, checkedAt, limits }
+export function claudeUsable() → boolean      // sync: installed, and not known to be logged out
+export function claudeLimits() → { status, resetsAt, fiveHour: { utilization, resetsAt }, sevenDay, at } | null
+export async function claudeChat({ model, messages, schema, effort = 'low', timeoutMs, signal })
+//  → { text, json, usage: { promptTokens, completionTokens, totalTokens, cost: 0, included: true, listCost }, model, id }
+export function toClaudeInput(messages) → { system, content }
+export function resetClaudeCache()
+```
+
+A call runs `claude -p --input-format stream-json --output-format stream-json --verbose
+--model <alias> --effort low --tools "" --safe-mode --strict-mcp-config
+--no-session-persistence --disable-slash-commands --permission-prompts none
+--system-prompt-file <file> [--json-schema <schema>]`: without a shell, in an empty
+temporary folder removed afterwards, with a timeout, an 8 MB output cap, at most two at a
+time, and only HOME, USER, LOGNAME, LANG and PATH in its environment. It never gets
+ANTHROPIC_API_KEY (with one, the CLI bills that key instead of the plan) or
+OPENROUTER_API_KEY. The user turn goes to stdin as one stream-json line; photos travel as
+base64 image blocks. A session whose init event lists MCP servers, or any tool other than
+StructuredOutput (the one Claude Code adds when a schema is passed), is stopped before the
+model answers. From `claude auth status` only `loggedIn`, `authMethod` and
+`subscriptionType` are read; the account's email and organisation never leave the module.
+
+Scopes: not installed, logged out, a session with tools, and the plan's usage limit are
+`provider`; a timeout, an unusable answer and a model the plan lacks are `model`; a
+cancel is `stop`.
+
+Measured on 2.1.270 with Sonnet: a six-line note became one lesson in 106 s at the default
+effort and in 43 s at `--effort low`, with the same structure, so every task runs at low
+effort unless it sets `planEffort`. `TASKS.extract.planTimeoutMs` is 240 s.
+
+### 9.3 `runTask()` with two providers
+
+- A plan model runs through `claudeChat()`, an OpenRouter model through `chat()`.
+- Without an OpenRouter key, OpenRouter models are left out of the chain instead of being
+  tried. When no plan model is in the chain either, the old "Add your OpenRouter API key"
+  error stays.
+- A failure that reaches its whole provider (a rejected key, an empty balance, or a
+  ClaudeCodeError of scope `provider`) skips that provider's remaining models; the other
+  provider's models still run. A cancel stops everything.
+- New exports: `aiReady(settings)` (a key, or a plan model in the order and
+  `claudeUsable()`) and `NO_AI_MESSAGE`. Routes that start AI work check `aiReady()` and
+  answer `400` with `NO_AI_MESSAGE`; `GET /suggestions/today` still answers `status: "no-key"`.
+- Usage rows gain `provider`. A plan row has `cost: 0`, `included: true` and `listCost`
+  (the API price the CLI reported). `usageTotals()` adds `includedCalls` and `includedListUsd`.
+
+### 9.4 REST additions
+
+| Method & path | Body → Response |
+|---|---|
+| `GET /settings` | adds `ai.ready` |
+| `GET /models` | every model: the order first (`rank` 1…n), then the plan models not in it (`rank: null`). Rows add `provider`, `enabled`, `included`, `available` |
+| `GET /ai/providers?refresh=1` | `{ ready, claude: { installed, version, loggedIn, authMethod, plan, checkedAt, limits, enabled: [ids] }, openrouter: { hasApiKey, keySource } }` |
+| `POST /ai/test` | a plan model needs no key; the whole list needs `aiReady()` |
+| `GET /data` | `{ parts: { lessons, words, notes, documents, progress, suggestions, usage, goals, profile, preferences, apiKey } }`, each with its counts and `empty` |
+| `POST /data/delete` | `{ parts: [ids] \| "all", confirm: "delete" }` → `{ ok, deleted, parts, settings, stats }`. Without `confirm: "delete"`, or with an unknown part, a 400 that deleted nothing |
+
+The parts, deleted in this order when several go in one request:
+
+| part | deletes | tidies |
+|---|---|---|
+| lessons | every lesson | words lose `lessonId`, notes lose `imported.lessonIds`, documents lose `covered` |
+| words | every word, with its schedule and history | lessons lose `wordIds`, notes lose `imported.wordIds`, "added" suggestions reopen |
+| notes | every note, and `data/uploads/*` | lessons and words lose `noteId`; use-once documents go |
+| documents | every material, and `data/materials/` | notes keep their `source`; processing one says the document is gone |
+| progress | `progress.json` back to the defaults | |
+| suggestions | `suggestions.json` back to `{}` | |
+| usage | the usage log | |
+| goals | `goals`, `display`, `script` back to the defaults | the welcome questions come back on the next page load |
+| profile | `learnerName`, `nativeLanguage`, `level`, `dailyGoalXp`, `newWordsPerDay` | |
+| preferences | `theme`, `tts`, `cardTemplates`, `ai.priority` (the plan switches with it), `ai.monthlyBudgetUsd` | the key stays |
+| apiKey | `ai.apiKey` | a key from `.env` cannot be deleted here |
+
+`all` resets every file above plus `models-cache.json`, removes `data/materials/`, empties
+`data/uploads/` and removes any `*.json.corrupt-*` copy the store set aside. The store is
+flushed before the reply. The Claude login is never touched.
+
+### 9.5 Client
+
+- Settings → **AI**: "Your Claude plan" (status from `/ai/providers`, a switch per plan
+  model, the 5-hour and 7-day usage from the last call), then the OpenRouter key, then one
+  model order for both. Switching a plan model on puts it below the plan models already at
+  the top. Usage rows of plan calls say "included".
+- Settings → **Delete data**: one row per part with its counts, and a Delete that opens a
+  confirmation saying what goes and what stays, with a backup link. "Delete everything"
+  needs DELETE typed, then clears this app's browser storage (`plumimemo.*`, `pml.*`) and
+  reloads into `#/welcome`. Before a settings part is deleted, owed debounced saves are
+  dropped instead of flushed.
+- Screens that offered AI only with a key now follow `settings.ai.ready`, and the Notes
+  model picker lists only the models on the learner's list.
+
+### 9.6 Tests
+
+`test/fixtures/fake-claude.mjs` stands in for the CLI through MEMOLANG_CLAUDE_BIN. It reads
+its behaviour from `$HOME/fake-claude.json` and logs each run to
+`$HOME/fake-claude-calls.jsonl`. `npm test` runs `test/*.test.js` only: the runner's default
+pattern also runs every `.mjs` file under `test/`, and the fake would wait on stdin forever.

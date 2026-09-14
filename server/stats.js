@@ -91,11 +91,14 @@ export function bumpDay(fields = {}) {
 }
 
 /* Totals over the append-only usage log. Exported because GET /api/usage wants
-   the same arithmetic with one extra field. */
+   the same arithmetic with one extra field. A call the learner's Claude plan
+   answered costs nothing here (its cost is 0); `includedListUsd` adds up what
+   those calls would have cost at API prices, so Settings can show what the plan
+   covered. */
 export function usageTotals() {
   const day = today();
   const month = day.slice(0, 7);
-  let todayUsd = 0, monthUsd = 0, allUsd = 0, calls = 0;
+  let todayUsd = 0, monthUsd = 0, allUsd = 0, calls = 0, includedCalls = 0, includedListUsd = 0;
   for (const e of coll('usage').all()) {
     const cost = Number(e?.cost) || 0;
     const d = e?.at ? today(new Date(e.at)) : '';
@@ -103,8 +106,15 @@ export function usageTotals() {
     allUsd += cost;
     if (d && d === day) todayUsd += cost;
     if (d && d.slice(0, 7) === month) monthUsd += cost;
+    if (e?.included) {
+      includedCalls += 1;
+      includedListUsd += Number(e?.listCost) || 0;
+    }
   }
-  return { todayUsd: round(todayUsd, 6), monthUsd: round(monthUsd, 6), allUsd: round(allUsd, 6), calls };
+  return {
+    todayUsd: round(todayUsd, 6), monthUsd: round(monthUsd, 6), allUsd: round(allUsd, 6), calls,
+    includedCalls, includedListUsd: round(includedListUsd, 6),
+  };
 }
 
 export function getStats() {

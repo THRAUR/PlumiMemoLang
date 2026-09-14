@@ -1,10 +1,13 @@
 /* The one door to the models. Every AI call in the app goes through runTask()
    so that four things stay in a single place:
 
-     - model order        the allowed models in ./models.js, tried top to bottom;
-                          when one fails, the next one takes over
-     - the key            settings.ai.apiKey, else OPENROUTER_API_KEY, else a
-                          sentence telling the learner where to paste one
+     - model order        the models in ./models.js, tried top to bottom; when one
+                          fails, the next one takes over
+     - the providers      OpenRouter models are paid with settings.ai.apiKey (else
+                          OPENROUTER_API_KEY, else a sentence telling the learner
+                          where to paste one); Claude plan models run through Claude
+                          Code on this computer (./claude-code.js), included in the
+                          learner's own Claude subscription
      - normalisation      what a model returns is *suggested* data, never trusted:
                           trimmed, deduped, readings filled in from shared/zhuyin.js,
                           fields coerced back into the shapes in ARCHITECTURE §3
@@ -16,7 +19,8 @@ import { config } from '../config.js';
 import { coll, doc } from '../store.js';
 import { DEFAULT_SETTINGS, deepMerge, isPlain } from '../defaults.js';
 import { chat } from '../openrouter.js';
-import { modelChain, isAllowedModel, modelName } from './models.js';
+import { claudeChat, claudeUsable } from './claude-code.js';
+import { modelChain, isAllowedModel, isPlanModel, modelName, normalisePriority, providerOf } from './models.js';
 import { buildMessages, SCHEMAS, POS, WORD_TYPES, SECTION_KINDS } from './prompts.js';
 import { pinyinToZhuyin, zhuyinToPinyin } from '../../shared/zhuyin.js';
 import { learnerProfile } from '../../shared/goals.js';
@@ -31,7 +35,10 @@ const SECTIONS_CAP = 12;
 
 /* `importance` and `why` say what each task is worth. Since the key was limited
    to four models, every task walks the same list (./models.js) instead of
-   picking its own; a task still sets its budget, tone and timeout. */
+   picking its own; a task still sets its budget, tone and timeout.
+   `planTimeoutMs`, where a task has one, is the limit for one attempt on a Claude
+   plan model: Claude Code starts a process per call and writes more slowly than
+   Gemini Flash Lite. Plan models run at low effort unless a task sets `planEffort`. */
 export const TASKS = {
   extract: {
     id: 'extract',
@@ -44,6 +51,11 @@ export const TASKS = {
     // Per attempt. Three photo-capable models at 3 min each stays inside the
     // 10 minutes a phone waits on the job before it gives up.
     timeoutMs: 180000,
+    // A short class note takes a plan model under a minute at low effort; twenty
+    // document pages take a few. A plan attempt that runs out plus one OpenRouter
+    // attempt still fit the phone's 10 minutes; only a chain where several models
+    // all time out runs past it.
+    planTimeoutMs: 240000,
     progress: 'Reading your notes…',
     progressAfter: 'Building the lesson…',
   },
@@ -95,11 +107,11 @@ export const TASKS = {
     id: 'test',
     label: 'Connection test',
     importance: 'low',
-    why: 'Says hello, to prove the key and the model work.',
+    why: 'Says hello, to prove a model on your list can answer.',
     defaultTemperature: 0.5,
     maxTokens: 300,
     timeoutMs: 45000,
-    progress: 'Saying hello to OpenRouter…',
+    progress: 'Saying hello…',
     progressAfter: '',
   },
 };
@@ -140,6 +152,18 @@ export function hasApiKey(settings) {
   try { return Boolean(resolveApiKey(settings)); } catch { return false; }
 }
 
+export const NO_AI_MESSAGE = 'Connect an AI first: turn on your Claude plan or add an OpenRouter API key in Settings.';
+
+/* Whether anything on the list can answer at all: an OpenRouter key, or a Claude
+   plan model in the order with Claude Code on this computer. Routes check it before
+   they start a job, so the learner reads "connect an AI" instead of watching a job
+   fail. */
+export function aiReady(settings) {
+  const s = resolveSettings(settings);
+  if (hasApiKey(s)) return true;
+  return normalisePriority(s.ai?.priority).some(isPlanModel) && claudeUsable();
+}
+
 function learnerFrom(settings, input) {
   const s = resolveSettings(settings);
   const l = isPlain(input?.learner) ? input.learner : {};
@@ -162,7 +186,6 @@ export async function runTask(taskId, input = {}, { settings, onProgress, signal
   if (!task) throw new Error(`Unknown AI task: ${taskId}`);
 
   const s = resolveSettings(settings);
-  const apiKey = resolveApiKey(s);            // throws the human "add your key" line
   const wanted = str(prefer);
   // The key's guardrail refuses every other model, so an id from anywhere else
   // (an old tab, a hand-written request) stops here instead of at OpenRouter.
@@ -172,8 +195,13 @@ export async function runTask(taskId, input = {}, { settings, onProgress, signal
   const images = Array.isArray(input?.images) && input.images.length > 0;
   // `only` is the per-model connection test: a dead model must show up as dead,
   // not be hidden by the next one answering for it.
-  const chain = only && wanted ? [wanted] : resolveChain(s, { images, prefer: wanted });
+  const listed = only && wanted ? [wanted] : resolveChain(s, { images, prefer: wanted });
+  // Without a key the OpenRouter models are left out instead of tried, since each
+  // would fail the same way. The Claude plan models need no key.
+  const keyed = hasApiKey(s);
+  const chain = keyed ? listed : listed.filter(isPlanModel);
   if (!chain.length) {
+    if (!keyed) resolveApiKey(s);            // throws the human "add your key" line
     throw new Error(images ? 'None of the allowed models can read photos.' : 'No allowed model is available.');
   }
   const learner = learnerFrom(s, input);
@@ -185,37 +213,53 @@ export async function runTask(taskId, input = {}, { settings, onProgress, signal
   const messages = buildMessages(taskId, input, learner);
   const schema = SCHEMAS[taskId] || null;
   const failures = [];
+  // Providers that failed in a way every one of their models would: skipped for
+  // the rest of this call, while the other provider's models still get their turn.
+  const dead = new Set();
 
   say(task.progress);
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
+    const provider = providerOf(model);
+    if (dead.has(provider)) continue;
     const started = Date.now();
     let usage = null;
     try {
-      const out = await chat({
-        apiKey,
-        model,
-        messages,
-        schema,
-        schemaName: taskId,
-        temperature: task.defaultTemperature,
-        maxTokens: task.maxTokens,
-        timeoutMs: timeoutMs || task.timeoutMs,
-        signal,
-      });
+      const out = provider === 'claude-code'
+        ? await claudeChat({
+          model,
+          messages,
+          schema,
+          effort: task.planEffort || 'low',
+          timeoutMs: timeoutMs || task.planTimeoutMs || task.timeoutMs,
+          signal,
+        })
+        : await chat({
+          apiKey: resolveApiKey(s),
+          model,
+          messages,
+          schema,
+          schemaName: taskId,
+          temperature: task.defaultTemperature,
+          maxTokens: task.maxTokens,
+          timeoutMs: timeoutMs || task.timeoutMs,
+          signal,
+        });
       usage = out.usage;
       say(task.progressAfter);
       const result = normalise(taskId, out, input, learner);
-      logUsage({ task: taskId, model: out.model || model, usage, ms: Date.now() - started, ok: true });
+      logUsage({ task: taskId, model: out.model || model, provider, usage, ms: Date.now() - started, ok: true });
       return { result, usage, model: out.model || model, fallbacks: failures };
     } catch (e) {
-      const message = humanMessage(e, taskId);
+      const message = humanMessage(e, taskId, provider);
       // The learner paid for the tokens even when the answer was unusable, so
       // every failed attempt is logged with whatever usage it reported.
-      logUsage({ task: taskId, model, usage: usage || e?.usage, ms: Date.now() - started, ok: false, error: message });
+      logUsage({ task: taskId, model, provider, usage: usage || e?.usage, ms: Date.now() - started, ok: false, error: message });
       failures.push({ model, error: message });
-      const next = chain[i + 1];
-      if (next && canFallBack(e, signal)) {
+      const reach = failureReach(e, signal);
+      if (reach === 'provider') dead.add(provider);
+      const next = reach === 'stop' ? null : chain.slice(i + 1).find((id) => !dead.has(providerOf(id)));
+      if (next) {
         say(`${modelName(model)} failed. Trying ${modelName(next)}…`);
         continue;
       }
@@ -225,15 +269,21 @@ export async function runTask(taskId, input = {}, { settings, onProgress, signal
   throw new Error('No allowed model is available.');   // unreachable: the loop returns or throws
 }
 
-/* A failure that belongs to one model (down, rate-limited, refused by the key's
-   allow-list, too slow, an unusable answer) moves on to the next model. One that
-   would repeat identically on every model stops at once: a rejected key, an
-   empty balance, or the learner cancelling. */
-function canFallBack(e, signal) {
-  if (signal?.aborted) return false;
+/* How far a failure reaches.
+     model     it belongs to one model (down, rate-limited, refused by the key's
+               allow-list, too slow, an unusable answer): the next model takes over
+     provider  every model of that provider would fail the same way (a rejected key,
+               an empty balance; Claude Code missing, logged out or at the plan's
+               usage limit): its other models are skipped, the other provider's run
+     stop      nothing else should run: the learner cancelled */
+function failureReach(e, signal) {
+  if (signal?.aborted) return 'stop';
+  if (e?.provider === 'claude-code') return ['model', 'provider', 'stop'].includes(e.scope) ? e.scope : 'model';
+  const said = String(e?.message || '');
+  if (/Cancelled/i.test(said)) return 'stop';
   const status = Number(e?.status ?? e?.cause?.status) || 0;
-  if (status === 401 || status === 402) return false;
-  return !/rejected the API key|out of credits|Cancelled/i.test(String(e?.message || ''));
+  if (status === 401 || status === 402 || /rejected the API key|out of credits/i.test(said)) return 'provider';
+  return 'model';
 }
 
 /* One failure keeps its own words. Several say which models were tried, so the
@@ -244,21 +294,22 @@ function finalError(e, message, failures) {
   return Object.assign(new Error(`Every model on your list failed (${tried}). The last one said: ${message}`), { cause: e, failures });
 }
 
-function humanMessage(e, taskId) {
+function humanMessage(e, taskId, provider = 'openrouter') {
   if (e instanceof TypeError || e instanceof RangeError) {
     console.error(`[ai ${taskId}]`, e);      // our bug, not the learner's problem
     return 'The model returned something this app could not read. Try again.';
   }
   const m = e?.message ? String(e.message) : '';
-  return m || 'Something went wrong talking to OpenRouter.';
+  return m || (provider === 'claude-code' ? 'Something went wrong talking to Claude Code.' : 'Something went wrong talking to OpenRouter.');
 }
 
-function logUsage({ task, model, usage, ms, ok, error = null }) {
+function logUsage({ task, model, provider = 'openrouter', usage, ms, ok, error = null }) {
   try {
-    usageLog.insert({
+    const row = {
       at: new Date().toISOString(),
       task,
       model,
+      provider,
       promptTokens: Number(usage?.promptTokens) || 0,
       completionTokens: Number(usage?.completionTokens) || 0,
       // Always a number: /api/usage and getStats() sum this column. 0 means
@@ -267,7 +318,15 @@ function logUsage({ task, model, usage, ms, ok, error = null }) {
       ms: Number(ms) || 0,
       ok: Boolean(ok),
       error: error || null,
-    });
+    };
+    // A Claude plan call is included in the plan: nothing is charged, and
+    // listCost keeps what it would have cost at API prices.
+    if (provider === 'claude-code') {
+      row.cost = 0;
+      row.included = true;
+      row.listCost = Number.isFinite(usage?.listCost) ? usage.listCost : null;
+    }
+    usageLog.insert(row);
   } catch (e) {
     console.error('[ai] could not write the usage log:', e.message);
   }

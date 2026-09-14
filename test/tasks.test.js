@@ -537,3 +537,114 @@ test('runTask falls back to the stored settings document', async (t) => {
   assert.equal(calls[0].body.model, G25, 'the stored order, completed with the rest of the list');
   assert.equal(result.reply, '嗨!(hāi!)');
 });
+
+/* ── the Claude plan: server/ai/claude-code.js against test/fixtures/fake-claude.mjs ── */
+
+const { fileURLToPath } = await import('node:url');
+const { resetClaudeCache } = await import('../server/ai/claude-code.js');
+const { aiReady } = await import('../server/ai/tasks.js');
+const PLAN_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'plumi-tasks-home-'));
+const FAKE_CLAUDE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
+const SONNET = 'claude-code:sonnet';
+const HAIKU = 'claude-code:haiku';
+const ASK = { word: { hanzi: '謝謝' }, question: 'When?' };
+
+/* The fake reads what to answer from $HOME, the one variable the app passes on
+   besides USER, LOGNAME, LANG and PATH. */
+function usePlan(scenario) {
+  process.env.HOME = PLAN_HOME;
+  process.env.MEMOLANG_CLAUDE_BIN = FAKE_CLAUDE;
+  fs.chmodSync(FAKE_CLAUDE, 0o755);
+  fs.writeFileSync(path.join(PLAN_HOME, 'fake-claude.json'), JSON.stringify(scenario));
+  fs.rmSync(path.join(PLAN_HOME, 'fake-claude-calls.jsonl'), { force: true });
+  resetClaudeCache();
+}
+function planCalls() {
+  try {
+    return fs.readFileSync(path.join(PLAN_HOME, 'fake-claude-calls.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+}
+after(() => fs.rmSync(PLAN_HOME, { recursive: true, force: true }));
+
+test('a Claude plan model answers first, needs no key, and is logged as included', async (t) => {
+  usePlan({ structured: { answer: 'Say it to thank anyone.' } });
+  const calls = stubFetch(t, completion({ answer: 'OpenRouter must not be asked.' }));
+  const before = usage.all().length;
+  const settings = { ...SETTINGS, ai: { apiKey: '', priority: [SONNET, G35] } };
+  assert.equal(aiReady(settings), true, 'the plan alone is enough');
+
+  const out = await runTask('explain', ASK, { settings });
+  assert.equal(out.model, SONNET);
+  assert.deepEqual(out.result, { answer: 'Say it to thank anyone.' });
+  assert.equal(calls.length, 0, 'no OpenRouter call, and no key needed');
+
+  const [call] = planCalls();
+  assert.equal(call.argv[call.argv.indexOf('--model') + 1], 'sonnet');
+  assert.ok(call.argv.includes('--json-schema'), 'the task schema goes along');
+  assert.match(call.system, /Traditional characters ONLY/, 'the same teacher prompt as OpenRouter gets');
+
+  const [row] = usageSince(before);
+  assert.equal(row.provider, 'claude-code');
+  assert.equal(row.model, SONNET);
+  assert.equal(row.cost, 0, 'included in the plan');
+  assert.equal(row.included, true);
+  assert.equal(row.listCost, 0.0123, 'what it would have cost at API prices');
+  assert.equal(row.ok, true);
+});
+
+test('a plan at its usage limit hands over to OpenRouter and skips the other plan models', async (t) => {
+  usePlan({ mode: 'limit' });
+  const calls = stubFetch(t, completion({ answer: 'From Gemini.' }, { model: G35 }));
+  const progress = [];
+  const before = usage.all().length;
+  const settings = { ...SETTINGS, ai: { apiKey: KEY, priority: [SONNET, HAIKU, G35] } };
+
+  const out = await runTask('explain', ASK, { settings, onProgress: (p) => progress.push(p) });
+  assert.equal(out.model, G35);
+  assert.equal(planCalls().length, 1, 'Haiku runs on the same plan, so it is not tried');
+  assert.deepEqual(calls.map((c) => c.body.model), [G35]);
+  assert.deepEqual(out.fallbacks.map((f) => f.model), [SONNET]);
+  assert.match(out.fallbacks[0].error, /usage limit/);
+  assert.ok(progress.includes('Claude Sonnet failed. Trying Gemini 3.5 Flash Lite…'), 'the job says what is happening');
+  assert.deepEqual(usageSince(before).map((r) => [r.model, r.ok, r.provider]), [[SONNET, false, 'claude-code'], [G35, true, 'openrouter']]);
+});
+
+test('a rejected OpenRouter key skips OpenRouter, and a plan model lower on the list still answers', async (t) => {
+  usePlan({ structured: { answer: 'From the plan.' } });
+  const calls = stubFetch(t, { status: 401, body: { error: { message: 'No auth credentials found', code: 401 } } });
+  const settings = { ...SETTINGS, ai: { apiKey: KEY, priority: [DS, G35, HAIKU] } };
+  const out = await runTask('explain', ASK, { settings });
+  assert.equal(out.model, HAIKU);
+  assert.deepEqual(calls.map((c) => c.body.model), [DS], 'one rejected call, not one per OpenRouter model');
+});
+
+test('without Claude Code the plan says so, and nothing else is tried without a key', async (t) => {
+  usePlan({});
+  process.env.MEMOLANG_CLAUDE_BIN = path.join(PLAN_HOME, 'no-claude-here');
+  resetClaudeCache();
+  const calls = stubFetch(t, completion({ answer: 'never' }));
+  const settings = { ...SETTINGS, ai: { apiKey: '', priority: [SONNET] } };
+  assert.equal(aiReady(settings), false);
+  await assert.rejects(() => runTask('explain', ASK, { settings }), /Claude Code is not installed/);
+  assert.equal(calls.length, 0);
+  assert.equal(aiReady({ ai: { apiKey: '', priority: [G35] } }), false, 'no key and no plan: nothing can answer');
+  assert.equal(aiReady({ ai: { apiKey: KEY } }), true);
+});
+
+test('photo notes reach a plan model as image blocks, and `only` tests one plan model', async (t) => {
+  usePlan({ structured: EXTRACT_ANSWER });
+  stubFetch(t, completion({ never: true }));
+  const settings = { ...SETTINGS, ai: { apiKey: KEY, priority: [DS, SONNET] } };
+  const { model, result } = await runTask('extract', EXTRACT_INPUT, { settings });
+  assert.equal(model, SONNET, 'the text-only model at the top is skipped for photos');
+  assert.equal(result.lessons.length, 1);
+  assert.deepEqual(planCalls()[0].message.message.content.map((c) => c.type), ['text', 'image']);
+
+  usePlan({ text: '你好!(nǐ hǎo!)' });
+  const hello = await runTask('test', {}, { settings, prefer: HAIKU, only: true });
+  assert.equal(hello.model, HAIKU);
+  assert.equal(hello.result.reply, '你好!(nǐ hǎo!)');
+  assert.ok(!planCalls()[0].argv.includes('--json-schema'), 'the connection test asks for a sentence, not JSON');
+});

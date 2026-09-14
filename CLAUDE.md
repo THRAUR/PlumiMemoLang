@@ -35,11 +35,13 @@ single file.
   It is stored in `data/settings.json` (gitignored) or `OPENROUTER_API_KEY`.
 - **Every AI call goes through `runTask()` in `server/ai/tasks.js`** so the model
   routing, the usage log and the cost estimate stay in one place.
-- **Only the models in `server/ai/models.js` may be called.** The OpenRouter key has a
-  guardrail allow-list, and any other model id comes back as 404 "not found". Settings
-  stores the order (`ai.priority`), `runTask()` walks it and falls back when a model
-  fails, and photo notes skip text-only models. Adding a model means adding it to that
-  file AND to the key's allow-list on openrouter.ai.
+- **Only the models in `server/ai/models.js` may be called.** Two kinds: the four
+  OpenRouter models, paid with the key, whose guardrail allow-list answers any other id
+  with 404 "not found"; and the learner's own Claude plan models, answered by Claude Code
+  on this computer (`server/ai/claude-code.js`), opt-in and included in their
+  subscription. Settings stores one order for both (`ai.priority`), `runTask()` walks it
+  and falls back when a model fails, and photo notes skip text-only models. Adding an
+  OpenRouter model means adding it to that file AND to the key's allow-list on openrouter.ai.
 - **Comments record why.** Keep them. Do not strip or reformat existing comments.
 - **Verify by loading, not just parsing:** `node --check` passes a missing import.
   Use `node --input-type=module -e "await import('./server/x.js')"` and run
@@ -53,7 +55,7 @@ server/          Express app, JSON store, SRS, OpenRouter client, AI tasks, rout
 shared/          pure modules used by BOTH server and browser (zhuyin/pinyin utils)
 public/          the app: index.html, plume.css (tokens), app.css (kit), js/, css/
 public/js/views/ one module per screen; each owns a stylesheet in public/css/
-test/            node:test suites (+ fixtures/seed.json)
+test/            node:test suites (+ fixtures: seed.json, and fake-claude.mjs standing in for Claude Code)
 scripts/         seed.mjs (fixture → running server), qa.sh (screenshot sweep), cdp.mjs (headless driver)
 data/            your data (gitignored): words.json, lessons.json, notes.json …
 ```
@@ -103,3 +105,22 @@ Never `pkill -f` a pattern that appears in your own command line — kill by the
   never reach a child process.
 - Documents (`data/materials/`) are not in the backup file, on purpose: a scanned book can be
   hundreds of megabytes.
+
+## The learner's Claude plan
+
+- `server/ai/claude-code.js` runs the `claude` command installed and logged in on this
+  machine, so AI work can use the learner's own subscription. It looks in `~/.local/bin`
+  itself, because pm2's PATH does not include it. MEMOLANG_CLAUDE_BIN in `.env` overrides
+  that; the tests point it at `test/fixtures/fake-claude.mjs`, so `npm test` never reaches
+  the real Claude Code.
+- Every call is locked down (`--tools ""`, `--safe-mode`, `--strict-mcp-config`,
+  `--no-session-persistence`) and runs like the document tools: no shell, a timeout, an
+  output cap, and only HOME, USER, LOGNAME, LANG and PATH. Never pass ANTHROPIC_API_KEY or
+  OPENROUTER_API_KEY to it: with an Anthropic key in its environment the CLI bills that key
+  instead of the plan.
+- Plan calls share the subscription's usage limits with every Claude Code session on this
+  machine, this one included. Test against the fake; spend real calls only to confirm a change.
+- `claude auth status` also prints the account's email and organisation. Only `loggedIn`,
+  `authMethod` and `subscriptionType` may leave the module.
+- Deleting data (`server/routes/data.js`) never touches the Claude login or anything outside
+  the data folder.

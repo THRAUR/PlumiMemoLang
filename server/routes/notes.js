@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { coll, newId } from '../store.js';
 import { config } from '../config.js';
-import { runTask, hasApiKey } from '../ai/tasks.js';
+import { runTask, aiReady, NO_AI_MESSAGE } from '../ai/tasks.js';
 import { isAllowedModel } from '../ai/models.js';
 import { createJob, setProgress } from '../jobs.js';
 import { addXp, bumpDay, getStats, readSettings } from '../stats.js';
@@ -297,7 +297,7 @@ r.get('/notes/:id/images/:name', (req, res, next) => {
 r.post('/notes/:id/process', (req, res) => {
   const note = noteOr404(req.params.id);
   const s = readSettings();
-  if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
+  if (!aiReady(s)) throw bad(NO_AI_MESSAGE);
   if (!note.source && !str(note.text) && !(note.images || []).length) throw bad('This note is empty.');
   // An optional model to start with. It must be on the allow-list; the rest of
   // the learner's priority list stays behind it as the backup.

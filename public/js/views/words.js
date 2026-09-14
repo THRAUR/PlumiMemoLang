@@ -405,7 +405,7 @@ function paintDetail(root, word, myGen) {
   const examples = (word.examples || []).map(exampleEl);
   const notesBlock = word.notes ? h('div', { class: 'wd-notes' }, h('p', { class: 'pl-eyebrow' }, 'Notes'), markdownish(word.notes)) : null;
 
-  const hasKey = !!settings?.ai?.hasApiKey;
+  const hasKey = !!settings?.ai?.ready;   // any AI: an OpenRouter key or the Claude plan
   const editBtn = h('button', {
     class: 'btn btn--sm', type: 'button',
     onClick: async () => {

@@ -104,6 +104,14 @@ export async function loadModels() {
   modelsCache = Array.isArray(raw) ? raw : (raw?.models || []);
   return modelsCache;
 }
+/* A model as a pill names it: "Claude Sonnet", not "claude-code:sonnet". Before the
+   list has loaded, and for an id nothing on the list matches, the id itself. A dated
+   id OpenRouter answered with is matched by its prefix. */
+export function modelLabel(id) {
+  const s = String(id || '');
+  const m = (modelsCache || []).find((x) => s === x.id || s.startsWith(`${x.id}-`) || s.startsWith(`${x.id}:`));
+  return m?.name || s;
+}
 
 /* ---------- the processing state ----------
    Used twice: straight after a save on #/notes, and when a note is opened
@@ -113,7 +121,7 @@ export function processingCard({ model = '', text = '', hint = '' } = {}) {
   const bird = createBird({ size: 4, mood: 'think' });
   const bubble = h('div', { class: 'bubble' }, text || 'Reading your notes…');
   const bar = progress(1, 1, 'is-busy');
-  const pill = h('span', { class: 'pill nt-model', hidden: !model }, model || '');
+  const pill = h('span', { class: 'pill nt-model', hidden: !model }, modelLabel(model));
   const el = h('div', { class: 'card nt-processing' },
     h('div', { class: 'coach' }, bird.el, bubble),
     bar,
@@ -123,7 +131,7 @@ export function processingCard({ model = '', text = '', hint = '' } = {}) {
   return {
     el,
     setProgress(t) { if (t) bubble.textContent = t; },
-    setModel(m) { pill.textContent = m || ''; pill.hidden = !m; },
+    setModel(m) { pill.textContent = modelLabel(m); pill.hidden = !m; },
   };
 }
 

@@ -163,8 +163,8 @@ function composeWindow(my) {
     title.value = ''; text.value = ''; paintStrip();
     busy(save, false);
 
-    if (!settings?.ai?.hasApiKey) {
-      toast('Saved. Add your OpenRouter key in Settings to turn notes into a lesson.', '', 5200);
+    if (!settings?.ai?.ready) {
+      toast('Saved. Connect an AI in Settings (your Claude plan or an OpenRouter key) to turn notes into a lesson.', '', 5200);
       navigate('/notes/' + note.id);
       return;
     }
@@ -352,12 +352,12 @@ function processBlock(note, my, reload) {
       h('div', { class: 'row' }, statusTag('error'), h('span', { class: 'pl-eyebrow no-rule' }, 'Last attempt')),
       h('p', null, note.error)));
   }
-  if (!settings?.ai?.hasApiKey) {
+  if (!settings?.ai?.ready) {
     box.append(h('div', { class: 'card nt-nokey' },
-      h('p', { class: 'h3' }, 'No OpenRouter key yet'),
+      h('p', { class: 'h3' }, 'No AI connected yet'),
       h('p', { class: 'muted' }, note.source
-        ? 'Plumi needs a key to read these pages and write the lessons. The document stays on this machine until you ask for one.'
-        : 'Plumi needs a key to read these notes and write the lesson. Your notes stay on this machine until you ask for one.'),
+        ? 'Plumi needs your Claude plan or an OpenRouter key to read these pages and write the lessons. The document stays on this machine until you ask for one.'
+        : 'Plumi needs your Claude plan or an OpenRouter key to read these notes and write the lesson. Your notes stay on this machine until you ask for one.'),
       h('a', { class: 'btn btn--primary', href: '#/settings' }, icon('settings'), 'Open Settings')));
     return box;
   }
@@ -382,8 +382,9 @@ function processBlock(note, my, reload) {
   loadModels().then((models) => {
     if (!isLive(my)) return;
     const want = resolvedExtractModel(withImages);
-    const opts = models.map((m) => h('option', { value: m.id },
-      `${m.rank ? `${m.rank}. ` : ''}${m.name || m.id}${hasImageInput(m) ? '' : ' · text only'}`));
+    // Only the models on the learner's list: a Claude plan model not switched on has no rank.
+    const opts = models.filter((m) => m.rank).map((m) => h('option', { value: m.id },
+      `${m.rank}. ${m.name || m.id}${m.provider === 'claude-code' ? ' · your plan' : hasImageInput(m) ? '' : ' · text only'}`));
     if (want && !models.some((m) => m.id === want)) opts.unshift(h('option', { value: want }, want));
     if (!opts.length) opts.push(h('option', { value: '' }, 'Server default'));
     sel.replaceChildren(...opts);

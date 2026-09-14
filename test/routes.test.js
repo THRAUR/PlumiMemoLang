@@ -853,7 +853,7 @@ test('usage and jobs', async () => {
   const usage = await GET('/usage');
   assert.equal(usage.status, 200);
   assert.deepEqual(usage.body.entries, [], 'no model was called');
-  assert.deepEqual(usage.body.totals, { todayUsd: 0, monthUsd: 0, allUsd: 0, calls: 0 });
+  assert.deepEqual(usage.body.totals, { todayUsd: 0, monthUsd: 0, allUsd: 0, calls: 0, includedCalls: 0, includedListUsd: 0 });
 
   const job = await GET('/jobs/does-not-exist');
   assert.equal(job.status, 404);

@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { coll } from '../store.js';
 import * as srs from '../srs.js';
-import { runTask, hasApiKey } from '../ai/tasks.js';
+import { runTask, aiReady, NO_AI_MESSAGE } from '../ai/tasks.js';
 import { createJob, setProgress } from '../jobs.js';
 import { readSettings } from '../stats.js';
 import {
@@ -92,7 +92,7 @@ r.delete('/words/:id', (req, res) => {
 r.post('/words/:id/enrich', (req, res) => {
   const word = wordOr404(req.params.id);
   const s = readSettings();
-  if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
+  if (!aiReady(s)) throw bad(NO_AI_MESSAGE);
   const job = createJob('enrich', async (j) => {
     setProgress(j, `Completing ${word.hanzi}…`);
     const out = await runTask('enrich', { word, nativeLanguage: s.nativeLanguage }, { settings: s, onProgress: (t) => setProgress(j, t) });
@@ -112,7 +112,7 @@ r.post('/words/:id/explain', async (req, res) => {
   if (!question) throw bad('Ask a question about this word.');
   if (question.length > 500) throw bad('That question is too long (500 characters max).');
   const s = readSettings();
-  if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
+  if (!aiReady(s)) throw bad(NO_AI_MESSAGE);
   const out = await runTask('explain', { word, question, nativeLanguage: s.nativeLanguage }, { settings: s });
   res.json({ answer: out.result?.answer ?? '', usage: out.usage, model: out.model });
 });

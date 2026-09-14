@@ -568,7 +568,7 @@ function pagePicker(doc, { my, onSaved }) {
   let stripTimer = null;
   const imgs = new Map();   // PDF page → <img>, so "9-1" becoming "9-11" keeps the previews that already loaded
   // Names the model on the processing card; nothing waits for it.
-  if (settings?.ai?.hasApiKey) loadModels().catch(() => {});
+  if (settings?.ai?.ready) loadModels().catch(() => {});
 
   /* --- pages --- */
   const pagesInput = h('input', {
@@ -772,7 +772,7 @@ function pagePicker(doc, { my, onSaved }) {
 
   function showGoError(message) {
     setKids(goError, icon('x'), h('p', null, message,
-      settings?.ai?.hasApiKey ? null : [' ', h('a', { href: '#/settings' }, 'Open Settings')]));
+      settings?.ai?.ready ? null : [' ', h('a', { href: '#/settings' }, 'Open Settings')]));
     goError.hidden = false;
   }
 
@@ -825,7 +825,7 @@ function pagePicker(doc, { my, onSaved }) {
     h('div', { class: 'grid-2' },
       h('div', { class: 'field' }, h('label', { class: 'label', for: `${uid}-title` }, 'Title'), titleInput),
       h('div', { class: 'field' }, h('label', { class: 'label', for: `${uid}-date` }, 'Class date'), dateInput)),
-    settings?.ai?.hasApiKey
+    settings?.ai?.ready
       ? null
       : h('p', { class: 'help' }, 'Plumi needs your OpenRouter key to read the pages. ', h('a', { href: '#/settings' }, 'Add it in Settings'), '.'),
     go,

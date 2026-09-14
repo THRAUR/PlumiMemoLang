@@ -217,9 +217,9 @@ function optionsBlock(ctx) {
   }
   out.push(typesBlock(ctx));
 
-  // The AI reading needs a key. `?demo=ai` pretends there is one so the
-  // passage question can be exercised without one.
-  if (settings?.ai?.hasApiKey || ctx.demo === 'ai') {
+  // The AI reading needs an AI to write it: an OpenRouter key or the Claude plan.
+  // `?demo=ai` pretends there is one so the passage question can be exercised without one.
+  if (settings?.ai?.ready || ctx.demo === 'ai') {
     const input = h('input', { type: 'checkbox', checked: ctx.reading });
     input.addEventListener('change', () => { ctx.reading = input.checked; });
     out.push(h('label', { class: 'check ch-reading-toggle' }, input,

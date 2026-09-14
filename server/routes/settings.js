@@ -1,10 +1,11 @@
-/* Settings, the model list and the connection test. The API key is write-only
-   on purpose: it goes in, and only ever comes back as a mask. */
+/* Settings, the model list, the AI providers and the connection test. The API key
+   is write-only on purpose: it goes in, and only ever comes back as a mask. */
 import { Router } from 'express';
 import { doc } from '../store.js';
 import { config } from '../config.js';
-import { runTask, resolveApiKey, hasApiKey } from '../ai/tasks.js';
-import { DEFAULT_PRIORITY, allowedModel, isAllowedModel, normalisePriority } from '../ai/models.js';
+import { runTask, resolveApiKey, hasApiKey, aiReady, NO_AI_MESSAGE } from '../ai/tasks.js';
+import { DEFAULT_PRIORITY, PLAN_IDS, allowedModel, isAllowedModel, isPlanModel, normalisePriority } from '../ai/models.js';
+import { claudeStatus, claudeUsable } from '../ai/claude-code.js';
 import { listModels, maskKey } from '../openrouter.js';
 import { DEFAULT_SETTINGS, deepMerge, isPlain } from '../defaults.js';
 import { readSettings } from '../stats.js';
@@ -19,9 +20,11 @@ const THEMES = ['light', 'dark', 'system'];
 function bad(msg, status = 400) { return Object.assign(new Error(msg), { status }); }
 
 /* The shape every settings response has: no apiKey, but enough to tell the
-   learner whether one is set and where it came from. The model order always
-   comes back complete and inside the allow-list, whatever the file holds. */
-function publicSettings(s) {
+   learner whether one is set and where it came from, and whether any AI can answer
+   at all (`ready`: a key, or a Claude plan model in the order with Claude Code on
+   this computer). The model order always comes back complete and inside the
+   allow-list, whatever the file holds. */
+export function publicSettings(s) {
   const envKey = config.envApiKey;
   const key = String(s.ai?.apiKey || '');
   const out = { ...s, ai: { ...s.ai } };
@@ -31,6 +34,7 @@ function publicSettings(s) {
   out.ai.apiKeyMasked = maskKey(key || envKey);
   out.ai.hasApiKey = Boolean(key || envKey);
   out.ai.keySource = key ? 'settings' : envKey ? 'env' : 'none';
+  out.ai.ready = aiReady(s);
   return out;
 }
 
@@ -158,8 +162,9 @@ function validatePatch(body) {
     if (body.ai.priority !== undefined) {
       if (!Array.isArray(body.ai.priority)) throw bad('ai.priority must be a list of model ids.');
       for (const id of body.ai.priority) {
-        // The key's guardrail refuses anything else, so storing it would only
-        // turn into an error on the next lesson.
+        // The key's guardrail refuses any other OpenRouter model, and a Claude plan
+        // model must be one of the three Claude Code is asked for, so storing
+        // anything else would only turn into an error on the next lesson.
         if (!isAllowedModel(id)) throw bad(`${String(id)} is not on the allowed model list.`);
       }
       p.ai.priority = normalisePriority(body.ai.priority);
@@ -192,10 +197,13 @@ r.put('/settings', (req, res) => {
   res.json(publicSettings(readSettings()));
 });
 
-/* Only the allowed models, in the learner's order, with whatever the OpenRouter
-   catalog knows about each (prices, context). The catalog is public, so this
-   works before a key is set; if it cannot be reached, the static list still
-   renders and `inCatalog` is false. */
+/* Every model this app may call: the order first, as the learner set it, then the
+   Claude plan models that are not in it (rank null, enabled false), so Settings can
+   offer them. OpenRouter rows carry whatever the catalog knows (prices, context).
+   The catalog is public, so this works before a key is set; if it cannot be
+   reached, the static list still renders and `inCatalog` is false. `available`
+   says whether that kind of model can answer here right now: a key for OpenRouter,
+   Claude Code on this computer for the plan. */
 r.get('/models', async (req, res) => {
   const s = readSettings();
   const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
@@ -206,28 +214,60 @@ r.get('/models', async (req, res) => {
   } catch {
     catalog = [];
   }
-  res.json(normalisePriority(s.ai?.priority).map((id, i) => {
+  const order = normalisePriority(s.ai?.priority);
+  const keyed = hasApiKey(s);
+  const planHere = claudeUsable();
+  const row = (id, rank) => {
     const m = allowedModel(id);
+    if (m.provider === 'claude-code') {
+      return {
+        id, name: m.name, provider: m.provider, vision: m.vision, why: m.why,
+        rank, enabled: rank !== null, included: true, available: planHere,
+        recommendedRank: PLAN_IDS.indexOf(id) + 1,
+        inCatalog: false, pricing: null, inputModalities: ['text', 'image'],
+      };
+    }
     const c = catalog.find((x) => x.id === id) || null;
     return {
       ...(c || {}),
-      id,
-      name: m.name,
-      vision: m.vision,
-      why: m.why,
-      rank: i + 1,
+      id, name: m.name, provider: m.provider, vision: m.vision, why: m.why,
+      rank, enabled: true, included: false, available: keyed,
       recommendedRank: DEFAULT_PRIORITY.indexOf(id) + 1,
       inCatalog: Boolean(c),
       inputModalities: c?.inputModalities || (m.vision ? ['text', 'image'] : ['text']),
     };
-  }));
+  };
+  res.json([
+    ...order.map((id, i) => row(id, i + 1)),
+    ...PLAN_IDS.filter((id) => !order.includes(id)).map((id) => row(id, null)),
+  ]);
+});
+
+/* What each provider can do on this machine right now, for the AI panel: whether
+   Claude Code is installed and logged in, and to which plan, with the plan's usage
+   windows from its last call; and whether an OpenRouter key is set. `refresh=1`
+   checks Claude Code again instead of answering from the one-minute cache. */
+r.get('/ai/providers', async (req, res) => {
+  const s = readSettings();
+  const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const claude = await claudeStatus({ refresh });
+  const key = String(s.ai?.apiKey || '');
+  res.json({
+    ready: aiReady(s),
+    claude: { ...claude, enabled: normalisePriority(s.ai?.priority).filter(isPlanModel) },
+    openrouter: { hasApiKey: hasApiKey(s), keySource: key ? 'settings' : config.envApiKey ? 'env' : 'none' },
+  });
 });
 
 r.post('/ai/test', async (req, res) => {
   const s = readSettings();
-  if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
   const model = String(req.body?.model ?? '').trim();
   if (model && !isAllowedModel(model)) throw bad('That model is not on the allowed list.');
+  // A Claude plan model needs no key. An OpenRouter model does, and the whole list
+  // needs something on it that can answer.
+  if (model ? (!isPlanModel(model) && !hasApiKey(s)) : !aiReady(s)) {
+    throw bad(model ? 'Add your OpenRouter API key first.' : NO_AI_MESSAGE);
+  }
   // With a model: exactly that one, no fallback, so a dead model shows as dead.
   // Without: the whole list, the way every real task runs.
   const out = await runTask('test', {}, { settings: s, prefer: model, only: Boolean(model) });

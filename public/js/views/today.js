@@ -399,7 +399,7 @@ function paintSugg() {
   }
   if (d.status === 'no-key') {
     host.append(suggState(
-      h('div', { class: 'card card--sunk td-note' }, h('p', { class: 'small' }, 'Add your OpenRouter key in Settings and Plumi will suggest new words every morning.')),
+      h('div', { class: 'card card--sunk td-note' }, h('p', { class: 'small' }, 'Connect an AI in Settings (your Claude plan or an OpenRouter key) and Plumi will suggest new words every morning.')),
       h('button', { class: 'btn btn--primary', type: 'button', onClick: () => navigate('/settings') }, pixelIcon('settings', 2), 'Open settings')));
     return;
   }

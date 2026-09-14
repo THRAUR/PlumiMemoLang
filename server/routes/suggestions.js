@@ -3,7 +3,7 @@
    costs one model call. */
 import { Router } from 'express';
 import { coll, doc } from '../store.js';
-import { runTask, hasApiKey } from '../ai/tasks.js';
+import { runTask, aiReady, NO_AI_MESSAGE } from '../ai/tasks.js';
 import { createJob, getJob, setProgress } from '../jobs.js';
 import { isPlain } from '../defaults.js';
 import { addXp, bumpDay, getStats, readSettings, today } from '../stats.js';
@@ -75,8 +75,9 @@ r.get('/suggestions/today', (req, res) => {
   const entry = entryFor(date);
   if (entry) return res.json({ date, status: 'ready', items: entry.items, model: entry.model || '', generatedAt: entry.generatedAt || null });
   const s = readSettings();
-  // No key is a normal state, not an error: Today just shows the invitation.
-  if (!hasApiKey(s)) return res.json({ date, status: 'no-key', items: [] });
+  // No AI connected is a normal state, not an error: Today just shows the invitation.
+  // The status keeps its old name, "no-key".
+  if (!aiReady(s)) return res.json({ date, status: 'no-key', items: [] });
   const already = activeJob(date);
   if (already) return res.json({ date, status: 'generating', items: [], jobId: already.id });
   const job = startGeneration(s, date);
@@ -86,7 +87,7 @@ r.get('/suggestions/today', (req, res) => {
 r.post('/suggestions/refresh', (req, res) => {
   const date = today();
   const s = readSettings();
-  if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.', 400);
+  if (!aiReady(s)) throw bad(NO_AI_MESSAGE, 400);
   const already = activeJob(date);
   if (already) return res.json({ jobId: already.id });
   // Replaces today's list: the learner asked for different words.

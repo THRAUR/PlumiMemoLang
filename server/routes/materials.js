@@ -10,7 +10,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { coll, newId } from '../store.js';
 import { isPlain } from '../defaults.js';
-import { hasApiKey } from '../ai/tasks.js';
+import { aiReady, NO_AI_MESSAGE } from '../ai/tasks.js';
 import { isAllowedModel } from '../ai/models.js';
 import { readSettings } from '../stats.js';
 import { capabilities, sniff, pageCount, renderPage, hasTextLayer, convertToPdf, OFFICE_EXTENSIONS } from '../lib/documents.js';
@@ -209,7 +209,7 @@ r.post('/materials/:id/lessons', async (req, res) => {
   const m = materialOr404(req.params.id);
   const b = isPlain(req.body) ? req.body : {};
   const s = readSettings();
-  if (!hasApiKey(s)) throw bad('Add your OpenRouter API key first.');
+  if (!aiReady(s)) throw bad(NO_AI_MESSAGE);
 
   const numbering = b.numbering === 'pdf' ? 'pdf' : 'printed';
   const offset = numbering === 'printed' ? Number(m.pageOffset) || 0 : 0;

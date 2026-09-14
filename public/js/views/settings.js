@@ -1,5 +1,5 @@
 /* ============================================================
-   settings.js — every knob, one screen, seven Mac windows.
+   settings.js — every knob, one screen, nine Mac windows.
 
    There is no Save button: each control writes its own partial through
    PUT /api/settings the moment it changes (text and numbers debounced
@@ -11,7 +11,7 @@
    that a key exists but never what it is.
    ============================================================ */
 import { api } from '../api.js';
-import { settings, setSettings, refreshStats, on } from '../state.js';
+import { settings, setSettings, setStats, refreshStats, on } from '../state.js';
 import { navigate } from '../router.js';
 import {
   h, toast, openWindow, confirmWindow, busy, pixelIcon, fmt, setTitle, tts,
@@ -38,6 +38,7 @@ const HANZI_HELP = {
 const FOCUS_TAG = { speaking: 'Speaking focus', characters: 'Characters focus', balanced: 'Balanced' };
 const FOCUS_WORDS = { speaking: 'speaking', characters: 'characters', balanced: 'a mix of speaking and characters' };
 const ABOUT_MAX = 500;       // the server's limit for goals.about
+const PLAN_NAMES = { pro: 'Pro', max: 'Max', team: 'Team', enterprise: 'Enterprise' };
 
 /* A settings document to render against while GET /api/settings is unavailable,
    so the screen is never blank and never throws on a missing branch. */
@@ -48,7 +49,7 @@ const FALLBACK = {
   cardTemplates: [],
   goals: { ...DEFAULT_GOALS },
   display: { hanzi: '' },
-  ai: { priority: [], monthlyBudgetUsd: 5, hasApiKey: false, apiKeyMasked: '' },
+  ai: { priority: [], monthlyBudgetUsd: 5, hasApiKey: false, apiKeyMasked: '', ready: false },
 };
 
 /* ---------- module state ---------- */
@@ -57,6 +58,8 @@ const pending = new Map();   // debounce timer → the save it owes
 let offSettings = null;      // state.on('settings') unsubscribe
 let onVoices = null;         // speechSynthesis voiceschanged handler
 let modelsCache = null;
+let providersCache = null;   // GET /api/ai/providers: what Claude Code on this computer can do
+let rootEl = null;           // where the screen is rendered, so a deletion can rebuild it
 const repaints = new Set();  // panels that derive from settings and repaint in place
 
 function cur() { return settings || FALLBACK; }
@@ -82,6 +85,25 @@ function win(opts) {
   return liveWin;
 }
 function closeWin() { liveWin?.close(); liveWin = null; }
+
+function plural(n, one, many) { return `${fmt.n(n)} ${Number(n) === 1 ? one : many}`; }
+function listText(items) {
+  const list = items.filter(Boolean);
+  if (list.length < 2) return list.join('');
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+function bytesText(n) {
+  const v = Number(n) || 0;
+  if (v < 1024 * 1024) return `${Math.max(1, Math.round(v / 1024))} KB`;
+  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
+}
+/* A reset time from the plan's usage windows (epoch seconds), on this device's clock. */
+function clock(epochSeconds) {
+  const d = new Date(Number(epochSeconds) * 1000);
+  if (!epochSeconds || Number.isNaN(d.getTime())) return '';
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? `at ${time}` : `${fmt.date(d.toISOString())}, ${time}`;
+}
 
 /* ---------- saving ---------- */
 async function save(patch) {
@@ -114,6 +136,12 @@ function flushPending() {
   for (const [t, flush] of pending) { clearTimeout(t); saves.push(flush()); }
   pending.clear();
   return Promise.all(saves);
+}
+/* The one exception to flushing: before settings are deleted, an owed save is
+   dropped, or a debounced name would write itself back over the defaults. */
+function dropPending() {
+  for (const t of pending.keys()) clearTimeout(t);
+  pending.clear();
 }
 
 /* ---------- kit shorthands ---------- */
@@ -405,9 +433,112 @@ function voicePanel() {
     h('div', { class: 'row row--wrap' }, test));
 }
 
-/* ---------- 4. AI (OpenRouter) ---------- */
+/* ---------- 4. AI ----------
+   Two ways to answer, one order. Your Claude plan runs through Claude Code on the
+   computer this app lives on and is included in the subscription; OpenRouter is
+   paid per call with a key. Plan models are switched on here and then sit in the
+   same model order as the OpenRouter ones, so "the plan first, OpenRouter when it
+   cannot answer" is simply the top of the list. */
 function aiPanel(my) {
-  /* --- the key --- */
+  const isPlanId = (id) => String(id || '').startsWith('claude-code:');
+
+  /* --- your Claude plan --- */
+  const planState = h('div', { class: 'row row--wrap st-planstate' }, h('span', { class: 'help' }, 'Looking for Claude Code on this computer…'));
+  const planHelp = h('p', { class: 'help' });
+  const planUse = h('p', { class: 'help st-planuse', hidden: true });
+  const planList = h('div', { class: 'list st-planlist' });
+  const recheck = h('button', { class: 'btn btn--sm btn--quiet', type: 'button' }, icon('refresh'), 'Check again');
+
+  const claude = () => providersCache?.claude || null;
+  const planReady = () => Boolean(claude()?.installed && claude()?.loggedIn);
+
+  async function loadProviders({ refresh = false } = {}) {
+    try {
+      const res = await api.get(`/api/ai/providers${refresh ? '?refresh=1' : ''}`);
+      if (my !== gen) return;
+      providersCache = res;
+    } catch (e) {
+      if (my !== gen) return;
+      setKids(planState, h('span', { class: 'help' }, e.message), recheck);
+      return;
+    }
+    paintPlan();
+    paintOrder();
+  }
+  recheck.addEventListener('click', async () => {
+    busy(recheck, true);
+    await loadProviders({ refresh: true });
+    busy(recheck, false);
+  });
+
+  function paintPlan() {
+    const c = claude();
+    if (!c) return;
+    const plan = PLAN_NAMES[c.plan] || (c.plan ? c.plan[0].toUpperCase() + c.plan.slice(1) : '');
+    setKids(planState,
+      !c.installed ? h('span', { class: 'pl-tag due' }, 'Claude Code not found')
+        : !c.loggedIn ? h('span', { class: 'pl-tag due' }, 'not logged in')
+          : h('span', { class: 'pl-tag good' }, plan ? `${plan} plan` : 'logged in'),
+      c.installed && c.version ? h('span', { class: 'pill mono' }, `Claude Code ${c.version}`) : null,
+      recheck);
+    planHelp.textContent = !c.installed
+      ? 'Install Claude Code on the computer this app runs on, log in with your Claude account, then check again.'
+      : !c.loggedIn
+        ? 'Claude Code is installed but not logged in. Run claude in a terminal on that computer, log in, then check again.'
+        : c.authMethod && c.authMethod !== 'claude.ai'
+          ? 'Claude Code is logged in with an API account, not a Claude subscription, so these calls are billed to that account.'
+          : 'Included in your subscription, so it costs no OpenRouter credits. It shares your plan’s usage limits with your own Claude chats and Claude Code.';
+    const w = c.limits?.fiveHour;
+    planUse.hidden = !w;
+    if (w) {
+      const week = c.limits?.sevenDay;
+      const reset = clock(w.resetsAt);
+      planUse.textContent = `Plan usage: ${Math.round(w.utilization * 100)}% of your 5-hour limit${reset ? `, resets ${reset}` : ''}${week ? ` · ${Math.round(week.utilization * 100)}% of the week` : ''}.`;
+    }
+    paintPlanList();
+  }
+
+  function paintPlanList() {
+    const plan = (modelsCache || []).filter((m) => m.provider === 'claude-code');
+    if (!plan.length) {
+      planList.replaceChildren(h('div', { class: 'list-row' }, h('span', { class: 'help' }, 'Loading the Claude models…')));
+      return;
+    }
+    const order = currentOrder();
+    const ready = planReady();
+    planList.replaceChildren(...plan.map((m) => {
+      const on = order.includes(m.id);
+      const cb = h('input', { type: 'checkbox' });
+      cb.checked = on;
+      // Switching a model off always works; switching one on waits for a working Claude Code.
+      cb.disabled = !on && !ready;
+      cb.addEventListener('change', () => togglePlan(m.id, cb));
+      return h('label', { class: 'list-row check st-planrow' },
+        cb,
+        h('span', { class: 'grow st-planrow-main' },
+          h('span', { class: 'st-prio-top' },
+            h('b', { class: 'st-prio-name' }, m.name),
+            m.recommendedRank === 1 ? h('span', { class: 'pl-tag' }, 'recommended') : null),
+          h('span', { class: 'st-prio-why' }, m.why)));
+    }));
+  }
+  repaints.add(paintPlanList);
+
+  /* Switching a model on is "use my plan first": it goes below the plan models
+     already at the top, above the first OpenRouter model. */
+  function togglePlan(id, cb) {
+    const order = currentOrder().filter((x) => x !== id);
+    if (cb.checked) {
+      const firstOther = order.findIndex((x) => !isPlanId(x));
+      order.splice(firstOther < 0 ? order.length : firstOther, 0, id);
+    }
+    save({ ai: { priority: order } }).then((s) => {
+      if (!s) cb.checked = !cb.checked;
+      else if (cb.checked) toast(`${nameOf(id)} answers first now.`, 'ok', 3000);
+    });
+  }
+
+  /* --- the OpenRouter key --- */
   const keyRow = h('div', { class: 'row row--wrap st-keyrow' });
   const actionRow = h('div', { class: 'row row--wrap st-keyactions' });
   const keyInput = h('input', { class: 'input', type: 'password', placeholder: 'Paste a new key', autocomplete: 'off', spellcheck: 'false' });
@@ -437,7 +568,7 @@ function aiPanel(my) {
   removeKey.addEventListener('click', async () => {
     if (!(await confirmWindow({
       title: 'Remove the key?',
-      text: 'Plumi stops being able to read notes, suggest words or write readings until you paste a new one.',
+      text: 'OpenRouter stops answering until you paste a new key. If your Claude plan is on, it keeps answering.',
       okLabel: 'Remove', danger: true,
     }))) return;
     await save({ ai: { apiKey: '' } });
@@ -455,11 +586,10 @@ function aiPanel(my) {
     }
   });
 
-  /* --- models: the allowed list, in the order Plumi tries them ---
-     The key only allows these models, so there is nothing to pick from, only
-     an order to set. Each row says why it sits where it does and what it costs,
-     and can be tested on its own: "is my backup alive?" has to be answerable
-     before the day the first model is down. */
+  /* --- models: every model on the list, in the order Plumi tries them ---
+     Each row says why it sits where it does and what it costs, and can be tested
+     on its own: "is my backup alive?" has to be answerable before the day the
+     first model is down. */
   const prioList = h('div', { class: 'list st-prio' });
   const prioNote = h('p', { class: 'help st-prio-note' }, 'Loading the model list…');
   const resetOrder = h('button', { class: 'btn btn--sm btn--quiet', type: 'button' }, icon('refresh'), 'Recommended order');
@@ -475,13 +605,17 @@ function aiPanel(my) {
   }
   function currentOrder() {
     const order = cur().ai?.priority;
-    return Array.isArray(order) && order.length ? order : (modelsCache || []).map((m) => m.id);
+    return Array.isArray(order) && order.length ? order : (modelsCache || []).filter((m) => m.rank).map((m) => m.id);
   }
+  /* The plan models the learner switched on stay on top, in their recommended
+     order; the OpenRouter models follow in theirs. */
   function recommendedOrder() {
-    return [...(modelsCache || [])]
-      .filter((m) => m.recommendedRank)
-      .sort((a, b) => a.recommendedRank - b.recommendedRank)
-      .map((m) => m.id);
+    const models = modelsCache || [];
+    const order = currentOrder();
+    const byRank = (a, b) => a.recommendedRank - b.recommendedRank;
+    const plan = models.filter((m) => m.provider === 'claude-code' && order.includes(m.id)).sort(byRank);
+    const rest = models.filter((m) => m.provider !== 'claude-code' && m.recommendedRank).sort(byRank);
+    return [...plan, ...rest].map((m) => m.id);
   }
   function move(id, delta) {
     const order = [...currentOrder()];
@@ -518,30 +652,36 @@ function aiPanel(my) {
     }
     const byId = new Map(modelsCache.map((m) => [m.id, m]));
     const keyed = Boolean(cur().ai?.hasApiKey);
+    const ready = planReady();
     prioList.replaceChildren(...order.map((id, i) => {
       const m = byId.get(id) || { id, name: id };
+      const plan = m.provider === 'claude-code' || isPlanId(id);
       const last = results.get(id);
       const up = h('button', { class: 'btn btn--icon btn--sm btn--quiet', type: 'button', 'aria-label': `Move ${m.name} up`, title: 'Move up', disabled: i === 0 }, icon('up'));
       const down = h('button', { class: 'btn btn--icon btn--sm btn--quiet', type: 'button', 'aria-label': `Move ${m.name} down`, title: 'Move down', disabled: i === order.length - 1 }, icon('down'));
       up.addEventListener('click', () => move(id, -1));
       down.addEventListener('click', () => move(id, 1));
+      const canTest = plan ? ready : keyed;
       const test = h('button', {
-        class: 'btn btn--sm', type: 'button', disabled: !keyed,
-        title: keyed ? `Send ${m.name} one short message` : 'Save a key first',
+        class: 'btn btn--sm', type: 'button', disabled: !canTest,
+        title: canTest ? `Send ${m.name} one short message` : plan ? 'Claude Code is not ready on this computer' : 'Save a key first',
       }, icon('bolt'), 'Test');
       test.addEventListener('click', () => testOne(id, test));
-      const price = m.pricing
-        ? `${per1M(m.pricing.prompt)} in · ${per1M(m.pricing.completion)} out, per 1M tokens`
-        : (m.inCatalog === false ? 'Not in the OpenRouter catalog right now' : '');
+      const meta = plan
+        ? 'Included in your Claude plan'
+        : m.pricing
+          ? `${per1M(m.pricing.prompt)} in · ${per1M(m.pricing.completion)} out, per 1M tokens`
+          : (m.inCatalog === false ? 'Not in the OpenRouter catalog right now' : '');
       return h('div', { class: 'list-row st-prio-row' },
         h('span', { class: `st-rank${i === 0 ? ' is-first' : ''}`, title: i === 0 ? 'Tried first' : 'Tried when the models above it fail' }, String(i + 1)),
         h('div', { class: 'grow st-prio-main' },
           h('div', { class: 'st-prio-top' },
             h('b', { class: 'st-prio-name' }, m.name || id),
-            h('span', { class: 'pl-tag' }, hasImage(m) ? 'reads photos' : 'text only'),
+            h('span', { class: 'pl-tag' }, plan ? 'your plan' : hasImage(m) ? 'reads photos' : 'text only'),
+            plan && providersCache && !ready ? h('span', { class: 'pl-tag due' }, 'not ready') : null,
             last ? h('span', { class: `pl-tag ${last.ok ? 'good' : 'bad'}` }, last.label) : null),
           m.why ? h('div', { class: 'st-prio-why' }, m.why) : null,
-          price ? h('div', { class: 'st-prio-meta mono' }, price) : null,
+          meta ? h('div', { class: 'st-prio-meta mono' }, meta) : null,
           h('div', { class: 'row st-prio-actions' }, test)),
         h('div', { class: 'st-prio-move' }, up, down));
     }));
@@ -565,6 +705,7 @@ function aiPanel(my) {
       toast(e.message, 'bad');
     }
     paintOrder();
+    paintPlanList();
   }
 
   /* --- budget --- */
@@ -589,7 +730,8 @@ function aiPanel(my) {
     const entries = (Array.isArray(data?.entries) ? data.entries : []).slice(-20).reverse();
     const budgetUsd = Number(cur().ai?.monthlyBudgetUsd || 0);
     const over = budgetUsd > 0 && Number(totals.monthUsd || 0) >= budgetUsd;
-    usageBox.replaceChildren(
+    const included = Number(totals.includedCalls || 0);
+    setKids(usageBox,
       h('div', { class: 'row row--wrap st-usagehead' },
         h('p', { class: 'pl-eyebrow no-rule' }, 'What you have spent'),
         over ? h('span', { class: 'pl-tag due' }, 'over budget') : null),
@@ -598,43 +740,54 @@ function aiPanel(my) {
         h('div', { class: 'score' }, h('div', { class: 'n' }, fmt.usd(totals.monthUsd)), h('div', { class: 'l' }, 'This month')),
         h('div', { class: 'score' }, h('div', { class: 'n' }, fmt.usd(totals.allUsd)), h('div', { class: 'l' }, 'All time')),
         h('div', { class: 'score' }, h('div', { class: 'n' }, fmt.n(totals.calls)), h('div', { class: 'l' }, 'Calls'))),
+      included
+        ? h('p', { class: 'help' }, `Your Claude plan answered ${plural(included, 'call', 'calls')}${totals.includedListUsd ? `, about ${fmt.usd(totals.includedListUsd)} at API prices` : ''}, included in your subscription.`)
+        : null,
       entries.length
         ? h('div', { class: 'list st-usage' }, entries.map((e) => h('div', { class: 'list-row st-usagerow' },
           h('span', { class: 'grow' },
             h('span', { class: 'st-usage-top' },
               h('span', { class: `pl-tag ${e.ok === false ? 'bad' : ''}`.trim() }, e.task || 'call'),
-              h('span', { class: 'st-usage-model mono ellipsis' }, e.model || '')),
+              h('span', { class: 'st-usage-model mono ellipsis' }, e.included ? nameOf(e.model) : e.model || '')),
             h('span', { class: 'st-usage-meta' },
               h('span', null, `${fmt.n(e.promptTokens)} in`),
               h('span', null, `${fmt.n(e.completionTokens)} out`),
               h('span', null, fmt.rel(e.at)))),
-          h('span', { class: 'st-usage-cost mono' }, fmt.usd(e.cost)))))
+          e.included
+            ? h('span', { class: 'pl-tag st-usage-cost' }, 'included')
+            : h('span', { class: 'st-usage-cost mono' }, fmt.usd(e.cost)))))
         : h('p', { class: 'help' }, 'No AI calls yet.'));
   }
 
   paintKey();
   paintOrder();
+  paintPlanList();
   loadModels();
+  loadProviders();
   loadUsage();
 
-  return panel('AI · OpenRouter',
+  return panel('AI',
     h('div', { class: 'field' },
-      h('span', { class: 'label' }, 'API key'),
+      h('span', { class: 'label' }, 'Your Claude plan'),
+      planState, planHelp, planUse, planList),
+    h('hr', { class: 'divider' }),
+    h('div', { class: 'field' },
+      h('span', { class: 'label' }, 'OpenRouter key'),
       keyRow,
       h('div', { class: 'row row--wrap st-keyform' }, keyInput, saveKey),
       h('span', { class: 'help' },
         'Create one at ',
         h('a', { href: 'https://openrouter.ai/keys', target: '_blank', rel: 'noopener noreferrer' }, 'openrouter.ai/keys'),
-        '. It is stored on this machine only and never sent to the browser again.'),
+        '. It is stored on this machine only and never sent to the browser again. With your Claude plan on, OpenRouter only answers when the plan cannot.'),
       actionRow),
     h('hr', { class: 'divider' }),
     h('div', { class: 'field' },
       h('span', { class: 'label' }, 'Model order'),
-      h('span', { class: 'help' }, 'Plumi starts at the top. When a model fails, it moves down to the next one. Your key only allows these models.'),
+      h('span', { class: 'help' }, 'Plumi starts at the top. When a model fails, it moves down to the next one. Your OpenRouter key only allows the four OpenRouter models.'),
       prioList,
       h('div', { class: 'row row--wrap st-prio-foot' }, prioNote, resetOrder)),
     h('hr', { class: 'divider' }),
-    field('Monthly budget (USD)', budget, 'A soft ceiling: Plumi warns you, it does not stop you.'),
+    field('Monthly budget (USD)', budget, 'A soft ceiling for OpenRouter: Plumi warns you, it does not stop you. Your Claude plan costs nothing here.'),
     usageBox);
 }
 
@@ -801,7 +954,204 @@ function dataPanel(my) {
     h('p', { class: 'help' }, 'To open the app on your phone, start the server with MEMOLANG_HOST=0.0.0.0 and use the network address it prints.'));
 }
 
-/* ---------- 7. About ---------- */
+/* ---------- 7. Delete data ----------
+   One row per part of the learner's data, each with its own Delete, and
+   "Delete everything" behind a typed confirmation. The server tidies the links
+   between parts (docs/ARCHITECTURE.md §9.4); each confirmation says what goes and
+   what stays, and offers the backup first, because nothing deleted comes back. */
+const PROFILE_NAMES = { learnerName: 'name', nativeLanguage: 'language', level: 'level', dailyGoalXp: 'daily goal', newWordsPerDay: 'new words per day' };
+const PREF_NAMES = { theme: 'theme', voice: 'voice', cards: 'card templates', models: 'model order', budget: 'budget' };
+const SETTINGS_PARTS = ['goals', 'profile', 'preferences', 'apiKey'];
+const ERASE = [
+  {
+    id: 'lessons', title: 'Lessons',
+    what: (p) => (p.count ? plural(p.count, 'lesson', 'lessons') : 'No lessons'),
+    confirm: (p) => `${plural(p.count, 'lesson goes', 'lessons go')}. Your words stay in your dictionary, no longer filed under a lesson.`,
+  },
+  {
+    id: 'words', title: 'Words',
+    what: (p) => (p.count ? `${plural(p.count, 'word', 'words')} · ${fmt.n(p.reviewed)} reviewed` : 'No words'),
+    confirm: (p) => `${plural(p.count, 'word goes', 'words go')}, with their memorization scores and review history. Lessons stay, without their word lists.`,
+  },
+  {
+    id: 'notes', title: 'Class notes',
+    what: (p) => (p.count ? `${plural(p.count, 'note', 'notes')}${p.photos ? ` · ${plural(p.photos, 'photo', 'photos')}` : ''}` : 'No notes'),
+    confirm: (p) => `${plural(p.count, 'note goes', 'notes go')}, with their photos and any draft not imported yet. Lessons and words you imported stay. A document you chose to use once goes with its notes.`,
+  },
+  {
+    id: 'documents', title: 'Documents',
+    what: (p) => (p.count ? `${plural(p.count, 'document', 'documents')} · ${bytesText(p.bytes)}` : 'No documents'),
+    confirm: (p) => `${plural(p.count, 'document goes', 'documents go')}, with their page previews. Lessons made from them stay.`,
+  },
+  {
+    id: 'progress', title: 'XP and streak',
+    what: (p) => (p.empty ? 'Nothing yet' : `${fmt.n(p.xpTotal)} XP · best streak ${fmt.n(p.bestStreak)} · ${plural(p.days, 'active day', 'active days')}`),
+    confirm: () => 'Your XP, streak, daily history and challenge results go back to zero. Your words keep their scores.',
+  },
+  {
+    id: 'suggestions', title: 'Word suggestions',
+    what: (p) => (p.days ? plural(p.days, 'day of suggestions', 'days of suggestions') : 'None'),
+    confirm: () => 'The words Plumi suggested go. Words you already added stay in your dictionary.',
+  },
+  {
+    id: 'usage', title: 'AI usage log',
+    what: (p) => (p.calls ? plural(p.calls, 'call logged', 'calls logged') : 'No calls'),
+    confirm: () => 'The log of AI calls and their cost goes. OpenRouter keeps its own record of what you spent.',
+  },
+  {
+    id: 'goals', title: 'Your goals',
+    what: (p) => (p.answered ? `Answered ${fmt.date(p.onboardedAt)}` : p.empty ? 'Not answered' : 'Partly answered'),
+    confirm: () => 'What you want to do, why you learn, your classes, readings, character size and your note to Plumi go. Plumi asks the welcome questions again the next time you open the app.',
+  },
+  {
+    id: 'profile', title: 'Personal info',
+    what: (p) => (p.empty ? 'Nothing set' : `Set: ${listText((p.set || []).map((k) => PROFILE_NAMES[k] || k))}`),
+    confirm: () => 'Your name, the language Plumi explains in, your level, your daily goal and new words per day go back to their defaults.',
+  },
+  {
+    id: 'preferences', title: 'Settings',
+    what: (p) => (p.empty ? 'All at their defaults' : `Changed: ${listText((p.changed || []).map((k) => PREF_NAMES[k] || k))}`),
+    confirm: () => 'Theme, voice, memo card templates, the model order (with your Claude plan switches) and the monthly budget go back to their defaults. Your OpenRouter key stays.',
+  },
+  {
+    id: 'apiKey', title: 'OpenRouter key',
+    what: (p) => (p.source === 'settings' ? 'Saved on this computer' : p.source === 'env' ? 'Set in the server’s .env file: remove it there' : 'No key'),
+    confirm: () => 'The key is removed from this computer. OpenRouter stops answering until you paste a key again; your Claude plan keeps answering if it is on.',
+  },
+];
+
+/* This app's keys in the browser: the theme and the Words filters. */
+function forgetThisDevice() {
+  for (const name of ['localStorage', 'sessionStorage']) {
+    try {
+      const store = window[name];
+      for (const key of Object.keys(store)) if (key.startsWith('plumimemo.') || key.startsWith('pml.')) store.removeItem(key);
+    } catch { /* storage is blocked in this browser */ }
+  }
+}
+
+function confirmDelete({ title, text, okLabel = 'Delete' }) {
+  return new Promise((resolve) => {
+    let done = false;
+    win({
+      title,
+      body: h('div', { class: 'stack st-erase-confirm' },
+        h('p', null, text),
+        h('p', { class: 'help' }, 'This cannot be undone. ',
+          h('a', { href: '/api/backup', download: 'plumimemolang-backup.json' }, 'Download a backup first'), '.')),
+      actions: [
+        { label: 'Cancel', onClick: () => { done = true; resolve(false); } },
+        { label: okLabel, class: 'btn--danger', onClick: () => { done = true; resolve(true); } },
+      ],
+      onClose: () => { if (!done) resolve(false); },
+    });
+  });
+}
+
+function erasePanel(my) {
+  const list = h('div', { class: 'list st-erase' },
+    h('div', { class: 'list-row' }, h('span', { class: 'help' }, 'Counting your data…')));
+  const everything = h('button', { class: 'btn', type: 'button' }, icon('trash'), 'Delete everything');
+  let parts = null;
+
+  async function load() {
+    try {
+      const res = await api.get('/api/data');
+      if (my !== gen) return;
+      parts = res?.parts || null;
+      paint();
+    } catch (e) {
+      if (my !== gen) return;
+      list.replaceChildren(h('div', { class: 'list-row' }, h('span', { class: 'help' }, e.message)));
+    }
+  }
+
+  function paint() {
+    if (!parts) return;
+    list.replaceChildren(...ERASE.map((part) => {
+      const p = parts[part.id] || { empty: true };
+      const del = h('button', {
+        class: 'btn btn--sm btn--quiet', type: 'button', disabled: Boolean(p.empty),
+        'aria-label': `Delete ${part.title.toLowerCase()}`,
+      }, icon('trash'), 'Delete');
+      del.addEventListener('click', () => deleteOne(part, p, del));
+      return h('div', { class: 'list-row st-erase-row' },
+        h('div', { class: 'grow st-erase-main' },
+          h('b', null, part.title),
+          h('span', { class: 'st-erase-what' }, part.what(p))),
+        del);
+    }));
+    everything.disabled = ERASE.every((part) => parts[part.id]?.empty);
+  }
+
+  /* Owed saves are flushed before data goes, but dropped before settings go: a
+     debounced name must not write itself back over the defaults a moment later. */
+  async function send(ids) {
+    const all = ids.includes('all');
+    if (all || ids.some((id) => SETTINGS_PARTS.includes(id))) dropPending();
+    else await flushPending();
+    try {
+      return await api.post('/api/data/delete', { parts: all ? 'all' : ids, confirm: 'delete' });
+    } catch (e) {
+      toast(e.message, 'bad', 5000);
+      return null;
+    }
+  }
+
+  async function deleteOne(part, p, button) {
+    const ok = await confirmDelete({ title: `Delete ${part.title.toLowerCase()}?`, text: part.confirm(p), okLabel: `Delete ${part.title.toLowerCase()}` });
+    if (!ok || my !== gen) return;
+    busy(button, true);
+    const res = await send([part.id]);
+    if (!res) { busy(button, false); return; }
+    if (part.id === 'preferences') window.PlumiTheme?.set?.('system');
+    setSettings(res.settings);
+    setStats(res.stats);
+    toast(part.id === 'goals'
+      ? 'Your goals are deleted. Plumi asks the welcome questions the next time you open the app.'
+      : `${part.title} deleted.`, 'ok', 4500);
+    rerender();
+  }
+
+  everything.addEventListener('click', () => {
+    const typed = h('input', {
+      class: 'input', type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
+      'aria-label': 'Type DELETE to confirm',
+    });
+    const go = h('button', { class: 'btn btn--danger', type: 'button', disabled: true }, 'Delete everything');
+    const cancel = h('button', { class: 'btn', type: 'button' }, 'Cancel');
+    typed.addEventListener('input', () => { go.disabled = typed.value.trim().toUpperCase() !== 'DELETE'; });
+    const w = win({
+      title: 'Delete everything?',
+      body: h('div', { class: 'stack st-erase-confirm' },
+        h('p', null, 'Every lesson, word, note and document, your progress, goals, personal info, settings and your OpenRouter key are deleted from this computer. Plumi starts again from the welcome questions.'),
+        h('p', { class: 'help' }, 'Your Claude login on this computer is not touched. This cannot be undone.'),
+        h('a', { class: 'btn btn--sm', href: '/api/backup', download: 'plumimemolang-backup.json' }, icon('star'), 'Download a backup first'),
+        h('label', { class: 'field' }, h('span', { class: 'label' }, 'Type DELETE to confirm'), typed)),
+      actions: [cancel, go],
+    });
+    cancel.addEventListener('click', () => w.close());
+    go.addEventListener('click', async () => {
+      busy(go, true);
+      const res = await send(['all']);
+      if (!res) { busy(go, false); return; }
+      forgetThisDevice();
+      // A fresh start: reload, so no screen keeps anything it had in memory.
+      history.replaceState(null, '', '#/welcome');
+      location.reload();
+    });
+  });
+
+  load();
+  return panel('Delete data',
+    h('p', { class: 'help' }, 'Delete one part of your data, or everything at once. Nothing deleted can be brought back, so download a backup first if you might want it again.'),
+    list,
+    h('div', { class: 'row row--wrap st-erase-foot' },
+      everything,
+      h('span', { class: 'help' }, 'Your Claude login and the app itself stay.')));
+}
+
+/* ---------- 8. About ---------- */
 function aboutPanel(my) {
   const version = h('span', { class: 'pill mono' }, 'version …');
   api.get('/api/health').then((hl) => {
@@ -811,15 +1161,40 @@ function aboutPanel(my) {
   return panel('About',
     h('div', { class: 'row row--wrap' },
       h('span', { class: 'pl-eyebrow no-rule' }, 'PlumiMemoLang'), version),
-    h('p', { class: 'help' }, 'PlumiMemoLang · your data stays on this machine; notes are sent to OpenRouter only when you ask for a lesson.'));
+    h('p', { class: 'help' }, 'PlumiMemoLang · your data stays on this machine; notes go to the AI you connected (your Claude plan or OpenRouter) only when you ask for a lesson.'));
 }
 
 /* ---------- the view ---------- */
-export default {
+function teardown() {
+  gen++;
+  closeWin();
+  repaints.clear();
+  offSettings?.();
+  offSettings = null;
+  if (onVoices) {
+    try { speechSynthesis.removeEventListener('voiceschanged', onVoices); } catch { /* no TTS here */ }
+    onVoices = null;
+  }
+}
+
+/* After a deletion every panel has to show the new state, so the screen is built
+   again where it was, at the same scroll position. */
+async function rerender() {
+  if (!rootEl?.isConnected) return;
+  const y = window.scrollY;
+  teardown();
+  modelsCache = null;
+  providersCache = null;
+  await view.render(rootEl);
+  window.scrollTo(0, y);
+}
+
+const view = {
   id: 'settings',
   title: 'Settings',
   async render(root) {
     const my = ++gen;
+    rootEl = root;
     repaints.clear();
 
     /* voicePanel() is null on a browser without speechSynthesis. */
@@ -831,6 +1206,7 @@ export default {
       aiPanel(my),
       templatesPanel(),
       dataPanel(my),
+      erasePanel(my),
       aboutPanel(my));
 
     /* Panels that only display settings (the key, the model order, the
@@ -844,15 +1220,10 @@ export default {
     setTitle('Settings');
   },
   unmount() {
-    gen++;
     flushPending();
-    closeWin();
-    repaints.clear();
-    offSettings?.();
-    offSettings = null;
-    if (onVoices) {
-      try { speechSynthesis.removeEventListener('voiceschanged', onVoices); } catch { /* no TTS here */ }
-      onVoices = null;
-    }
+    teardown();
+    rootEl = null;
   },
 };
+
+export default view;

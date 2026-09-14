@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { coll, doc, newId } from '../store.js';
 import * as srs from '../srs.js';
-import { runTask, hasApiKey } from '../ai/tasks.js';
+import { runTask, aiReady } from '../ai/tasks.js';
 import { createJob, setProgress } from '../jobs.js';
 import { DEFAULT_PROGRESS, deepMerge, isPlain } from '../defaults.js';
 import { addXp, bumpDay, getStats, readSettings } from '../stats.js';
@@ -60,7 +60,7 @@ r.post('/challenge/build', (req, res) => {
   const seed = b.seed === undefined || b.seed === null ? null : String(b.seed);
 
   if (b.reading) {
-    if (!hasApiKey(s)) throw bad('Add your OpenRouter API key to generate a reading.');
+    if (!aiReady(s)) throw bad('Connect an AI in Settings to write a reading: your Claude plan or an OpenRouter key.');
     const pool = poolFor(lessonId);
     if (pool.length < 4) throw bad('Add at least 4 words first.');
     const rng = makeRng(seed);
