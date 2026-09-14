@@ -1,12 +1,24 @@
 {
   "name": "plumimemolang",
   "version": "0.1.0",
-  "description": "A local Traditional Chinese study desk: memo cards, a scored dictionary, challenges, and AI lesson cards built from your own class notes.",
+  "description": "A local Traditional Chinese study desk: memo cards, a scored dictionary, challenges, and AI lessons built from your own class notes.",
+  "license": "MIT",
+  "author": "THRAUR",
+  "homepage": "https://github.com/THRAUR/PlumiMemoLang#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/THRAUR/PlumiMemoLang.git"
+  },
+  "bugs": {
+    "url": "https://github.com/THRAUR/PlumiMemoLang/issues"
+  },
+  "keywords": ["chinese", "traditional-chinese", "mandarin", "taiwan", "zhuyin", "pinyin", "language-learning", "spaced-repetition", "flashcards"],
   "type": "module",
   "private": true,
   "engines": { "node": ">=22.12" },
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
+    "launch": "node --env-file-if-exists=.env server/index.js --open",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "test": "node --test \"test/*.test.js\""
   },

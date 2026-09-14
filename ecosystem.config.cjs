@@ -60,7 +60,7 @@ module.exports = {
 
       // On SIGINT the server flushes the JSON store's debounced writes before it
       // exits (shutdown() in server/index.js). pm2's default 1.6 s before SIGKILL
-      // is tight on the slow /mnt/d disk; a grade must never be lost to a restart.
+      // is tight on a slow disk; a grade must never be lost to a restart.
       kill_timeout: 5000,
 
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',

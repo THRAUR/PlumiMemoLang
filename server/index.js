@@ -53,7 +53,15 @@ app.use((err, req, res, next) => {
 });
 
 const server = app.listen(config.port, config.host, () => {
-  const lines = [`PlumiMemoLang ${config.version}`, ``, ` local    http://${config.host === '0.0.0.0' ? '127.0.0.1' : config.host}:${config.port}`];
+  const local = `http://${config.host === '0.0.0.0' ? '127.0.0.1' : config.host}:${config.port}`;
+  const lines = [`PlumiMemoLang ${config.version}`, ``, ` local    ${local}`];
+  // `npm run launch` (and the start-mac / start-windows files) open the app in the browser.
+  if (process.argv.includes('--open')) {
+    setTimeout(() => {
+      console.log(`\nOpening ${local} in your browser. Keep this window open while you study.`);
+      import('./lib/platform.js').then(({ openInBrowser }) => openInBrowser(local)).catch(() => {});
+    }, 0);
+  }
   if (config.host === '0.0.0.0') {
     for (const ifs of Object.values(os.networkInterfaces())) {
       for (const i of ifs || []) if (i.family === 'IPv4' && !i.internal) lines.push(` network  http://${i.address}:${config.port}`);

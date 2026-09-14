@@ -66,7 +66,9 @@ function safeName(raw, type, taken) {
     ext = IMAGE_TYPES[type] || '';
     name += ext;
   }
-  const base = ext ? name.slice(0, -ext.length) : name;
+  let base = ext ? name.slice(0, -ext.length) : name;
+  // Windows cannot create a file called CON, NUL, COM1 and the like, whatever its extension.
+  if (/^(con|prn|aux|nul|com\d|lpt\d)$/i.test(base)) base = `_${base}`;
   let out = `${base.slice(0, 60)}${ext}`;
   let n = 2;
   while (taken.has(out)) out = `${base.slice(0, 60)}-${n++}${ext}`;

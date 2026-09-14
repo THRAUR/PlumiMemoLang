@@ -660,7 +660,7 @@ Documents need poppler (`pdfinfo`, `pdftoppm`, `pdftotext`); office conversion n
 
 | Method & path | Body → Response |
 |---|---|
-| `GET /capabilities` | `{ documents, office, officeTypes, reasons: { documents?, office? } }`. `officeTypes` lists the extensions this machine converts: here .pptx, .ppt and .odp, because LibreOffice has Impress but no Writer |
+| `GET /capabilities` | `{ documents, office, officeTypes, reasons: { documents?, office? } }`. `officeTypes` lists the extensions this computer converts: a LibreOffice without Writer, for one, gives only .pptx, .ppt and .odp |
 | `POST /materials?name=&title=&keep=1\|0` | raw file bytes, streamed (PDF; .docx .doc .pptx .ppt .odt .odp .rtf when office), ≤ 500 MB → `201 Material` |
 | `GET /materials` | `{ materials }`: kept ones plus ones a note still uses, newest first |
 | `GET /materials/:id` | Material |
@@ -709,8 +709,9 @@ button.
 - Nothing overlaps a stroke or leaves its box at 375 px; long pinyin wraps.
 - While a text field has focus on a phone, the tab bar hides so the keyboard cannot push
   it over the field.
-- Check at 375×667, 390×844 and 430×932 with `scripts/cdp.mjs`. Playwright's WebKit cannot run on this
-  machine (missing GTK 4 and GStreamer libraries), so iOS-only behaviour is handled from known Safari rules.
+- Check at 375×667, 390×844 and 430×932 with `scripts/cdp.mjs`. Headless Chromium stands in for
+  phones; iOS-only behaviour is handled from known Safari rules, since WebKit is not always
+  available to test with.
 
 ### 8.9 Known follow-ups
 
@@ -870,3 +871,59 @@ for everything the AI writes for the learner:
   `runTask()` drops a `meaningNative` that only repeats `meaning`.
 - Content generated earlier stays as it was: importing merges into existing words and only fills
   empty fields, so re-importing a note does not translate a stored meaning.
+
+## 10. macOS, Windows and Linux, and a public repository (2026-09-14)
+
+The learner wants to share the project, and to have it run on other people's computers:
+macOS and Windows as well as the Linux box it was built on. This section is binding like
+§1–§9.
+
+### 10.1 `server/lib/platform.js`
+
+```js
+export const IS_WINDOWS, IS_MAC
+export function minimalEnv(extra) → env      // what a program needs to start on this system, plus `extra`
+export function findProgram(name, { envVar, only, prefer, fallback }) → path | ''
+export function installHint(tool) → sentence  // 'poppler' | 'libreoffice', for this system
+export function openInBrowser(url)            // an address the app built, never one a request supplied
+```
+
+- `minimalEnv()` passes HOME, USER, LOGNAME, LANG, PATH and TMPDIR on Linux and macOS, and
+  PATH, PATHEXT, SystemRoot, SystemDrive, windir, TEMP, TMP, USERPROFILE, HOMEDRIVE, HOMEPATH,
+  APPDATA, LOCALAPPDATA, USERNAME and HOME on Windows. Never a key.
+- `findProgram()` returns a full path, so no child depends on PATH. On Windows it looks for
+  `name.exe` only: since Node 20 a `.cmd` or `.bat` cannot be started without a shell, and
+  nothing here uses one. With `envVar` set, that variable is the only place looked at.
+- Poppler: PATH, then Homebrew's folders (macOS) or the Scoop and Chocolatey shims (Windows);
+  `MEMOLANG_POPPLER_PATH` names its folder instead. LibreOffice: PATH, then the app bundle
+  (macOS) or Program Files (Windows); `MEMOLANG_SOFFICE` names the program. Claude Code:
+  `~/.local/bin` and `~/.claude/local` before PATH; `MEMOLANG_CLAUDE_BIN` names it.
+- LibreOffice's throwaway profile is passed as a real file URL (`pathToFileURL`).
+- A `MEMOLANG_CLAUDE_BIN` that is a script (`.js`, `.mjs`, `.cjs`) runs through
+  `process.execPath`, because Windows cannot start a file by its `#!` line. The tests' fake
+  Claude Code relies on it.
+
+### 10.2 Other changes for Windows
+
+- The store retries replacing a data file for about a second when Windows reports it busy
+  (`EPERM`, `EACCES`, `EBUSY`), which an antivirus or the search indexer can cause.
+- A photo whose name is a reserved Windows device name (CON, NUL, COM1…) is stored as `_CON.jpg`.
+- `.gitattributes` keeps LF everywhere except `.cmd` and `.bat` files, which get CRLF.
+
+### 10.3 Starting it
+
+| How | What it does |
+|---|---|
+| `start-mac.command`, double-clicked | checks for Node.js 22.12 or newer, runs `npm install` the first time, then `npm run launch` |
+| `start-windows.cmd`, double-clicked | the same on Windows |
+| `npm run launch` | `npm start` with `--open`: once the server listens, it opens its local address in the default browser |
+
+### 10.4 Checks and release files
+
+- `.github/workflows/test.yml` runs `npm test` on ubuntu-latest, macos-latest and
+  windows-latest with Node 22, installing poppler first so the PDF tests run.
+- `LICENSE` is MIT. The bundled fonts are under the SIL Open Font License; their licence texts
+  are in `public/fonts/licenses/`.
+- Notes about one machine (a live instance, a staging copy) belong in `CLAUDE.local.md`, which
+  git ignores; `CLAUDE.md` stays generic.
+- `docs/screenshots/` holds the README's phone screenshots, taken on `scripts/seed.mjs` data.

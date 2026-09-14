@@ -39,6 +39,21 @@ function schedule(name) {
   pending.set(name, setTimeout(() => { pending.delete(name); void flush(name); }, DEBOUNCE_MS));
 }
 
+/* Windows refuses to replace a file that another program holds open for a moment (an
+   antivirus or the search indexer glancing at it), so a failed swap is retried a few
+   times before the write counts as failed. */
+async function replaceFile(tmp, file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(tmp, file);
+      return;
+    } catch (e) {
+      if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 20 * 2 ** attempt));
+    }
+  }
+}
+
 async function flush(name) {
   const h = registry.get(name);
   if (!h) return;
@@ -48,7 +63,7 @@ async function flush(name) {
     const file = fileFor(name);
     const tmp = file + '.tmp';
     await fs.writeFile(tmp, data, 'utf8');
-    await fs.rename(tmp, file);
+    await replaceFile(tmp, file);
   }).catch((e) => console.error(`[store] write ${name}.json failed:`, e.message));
   writing.set(name, p);
   return p;

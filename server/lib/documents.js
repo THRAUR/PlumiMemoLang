@@ -5,29 +5,66 @@
    never become a command, a hung converter can never hold a request forever, and
    the app's own environment (the OpenRouter key when it comes from .env) never
    reaches a child process. A missing tool is a missing capability, not a crash:
-   capabilities() says what this machine can do and, when it cannot, why. */
+   capabilities() says what this computer can do and, when it cannot, why.
+
+   The tools are started by full path (./platform.js), so Homebrew's poppler on a Mac,
+   the LibreOffice app bundle and a Windows install under Program Files work without
+   touching PATH. MEMOLANG_POPPLER_PATH (a folder) and MEMOLANG_SOFFICE (the program)
+   point at copies installed anywhere else. */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { IS_MAC, IS_WINDOWS, findProgram, minimalEnv, installHint } from './platform.js';
 
 export const OFFICE_EXTENSIONS = ['.docx', '.doc', '.pptx', '.ppt', '.odt', '.odp', '.rtf'];
 
+/* Where installers put these when PATH does not include them. */
+const POPPLER_DIRS = IS_MAC ? ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin']
+  : IS_WINDOWS ? [path.join(os.homedir(), 'scoop', 'shims'), 'C:\\ProgramData\\chocolatey\\bin']
+    : ['/usr/bin', '/usr/local/bin'];
+const SOFFICE_DIRS = IS_MAC ? ['/Applications/LibreOffice.app/Contents/MacOS', path.join(os.homedir(), 'Applications', 'LibreOffice.app', 'Contents', 'MacOS')]
+  : IS_WINDOWS ? ['C:\\Program Files\\LibreOffice\\program', 'C:\\Program Files (x86)\\LibreOffice\\program']
+    : ['/usr/bin', '/usr/lib/libreoffice/program', '/opt/libreoffice/program', '/snap/bin'];
+
 function childEnv() {
-  return { PATH: process.env.PATH || '/usr/bin:/bin', HOME: os.homedir(), LANG: 'C.UTF-8' };
+  // One fixed UTF-8 locale, so poppler reads and writes text the same way everywhere.
+  return minimalEnv(IS_WINDOWS ? {} : { LANG: IS_MAC ? 'en_US.UTF-8' : 'C.UTF-8' });
 }
 
-/* Present means "the binary starts"; ENOENT is the only answer that means absent. */
-function installed(bin) {
-  const r = spawnSync(bin, ['-v'], { stdio: 'ignore', timeout: 8000, env: childEnv() });
-  return !(r.error && r.error.code === 'ENOENT');
+/* The full path of each tool, looked up once (again after capabilities({ refresh })). */
+const found = new Map();
+function tool(name) {
+  if (!found.has(name)) {
+    const popplerDir = String(process.env.MEMOLANG_POPPLER_PATH || '').trim();
+    const where = name === 'soffice'
+      ? findProgram('soffice', { envVar: 'MEMOLANG_SOFFICE', fallback: SOFFICE_DIRS })
+      : findProgram(name, popplerDir ? { only: [popplerDir] } : { fallback: POPPLER_DIRS });
+    found.set(name, where);
+  }
+  return found.get(name);
+}
+
+/* Present means "the program starts"; a file that is there but cannot run counts as
+   absent, since every page would fail the same way. */
+function installed(name) {
+  const file = tool(name);
+  if (!file) return false;
+  const r = spawnSync(file, ['-v'], { stdio: 'ignore', timeout: 8000, env: childEnv(), windowsHide: true });
+  return !(r.error && ['ENOENT', 'EACCES', 'UNKNOWN'].includes(r.error.code));
 }
 
 export function run(bin, args, { timeoutMs = 60000, maxBytes = 64 * 1024 * 1024, cwd } = {}) {
   return new Promise((resolve, reject) => {
+    const file = tool(bin);
+    if (!file) {
+      reject(new Error(`${bin} is not installed.`));
+      return;
+    }
     let settled = false;
     const done = (fn, value) => { if (!settled) { settled = true; clearTimeout(timer); fn(value); } };
-    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv() });
+    const child = spawn(file, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv(), windowsHide: true });
     const out = [];
     let size = 0;
     let err = '';
@@ -49,28 +86,30 @@ export function run(bin, args, { timeoutMs = 60000, maxBytes = 64 * 1024 * 1024,
   });
 }
 
-/* ---------- what this machine can do ---------- */
+/* ---------- what this computer can do ---------- */
 
 let probing = null;
 
 export function capabilities({ refresh = false } = {}) {
   if (probing && !refresh) return probing;
+  if (refresh) found.clear();
   probing = (async () => {
     const out = { documents: false, office: false, officeTypes: [], reasons: {} };
     const missing = ['pdfinfo', 'pdftoppm', 'pdftotext'].filter((b) => !installed(b));
-    if (missing.length) out.reasons.documents = `This machine is missing ${missing.join(', ')} (the poppler-utils package), so PDFs cannot be read.`;
+    if (missing.length) out.reasons.documents = `PDFs cannot be read here: poppler (${missing.join(', ')}) is missing. ${installHint('poppler')}`;
     else out.documents = true;
-    if (!installed('soffice')) {
-      out.reasons.office = 'LibreOffice is not installed, so Word and PowerPoint files cannot be converted. Upload a PDF instead.';
+    // LibreOffice is only looked for here: `soffice -v` would start the whole suite.
+    if (!tool('soffice')) {
+      out.reasons.office = `LibreOffice is not installed, so Word and PowerPoint files cannot be converted. Upload a PDF instead. ${installHint('libreoffice')}`;
     } else {
       // Real conversions of tiny files, one per LibreOffice part: it can be installed
-      // without Writer or Impress, and then those conversions fail in 300 ms. This
-      // machine, for one, has Impress but no Writer.
+      // without Writer or Impress, and then those conversions fail in 300 ms. A
+      // LibreOffice without Writer, for one, converts presentations and no Word file.
       const cannot = [];
       try { await probeOffice('rtf'); out.officeTypes.push('.docx', '.doc', '.odt', '.rtf'); } catch { cannot.push('Word files'); }
       try { await probeOffice('pptx'); out.officeTypes.push('.pptx', '.ppt', '.odp'); } catch { cannot.push('PowerPoint files'); }
       out.office = out.officeTypes.length > 0;
-      if (cannot.length) out.reasons.office = `LibreOffice on this machine cannot convert ${cannot.join(' or ')}. Upload a PDF instead.`;
+      if (cannot.length) out.reasons.office = `LibreOffice on this computer cannot convert ${cannot.join(' or ')}. Upload a PDF instead.`;
     }
     return out;
   })();
@@ -115,7 +154,7 @@ export async function pageCount(file) {
   const m = /^Pages:\s+(\d+)/m.exec(stdout.toString('utf8'));
   if (code !== 0 || !m) {
     if (/password|encrypt/i.test(stderr)) throw new Error('This PDF is password-protected. Remove the password and upload it again.');
-    throw new Error('This file is not a PDF this machine can read.');
+    throw new Error('This file is not a PDF this computer can read.');
   }
   return Number(m[1]);
 }
@@ -142,7 +181,7 @@ export async function pageText(file, page, { maxChars = 4000 } = {}) {
       timeoutMs: 30000, maxBytes: 8 * 1024 * 1024,
     });
     if (code !== 0) return '';
-    return stdout.toString('utf8').replace(/\f/g, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, maxChars);
+    return stdout.toString('utf8').replace(/\r\n/g, '\n').replace(/\f/g, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, maxChars);
   } catch {
     return '';
   }
@@ -165,7 +204,8 @@ export async function convertToPdf(inputFile, { timeoutMs = 180000 } = {}) {
   const cleanup = () => fs.rm(work, { recursive: true, force: true });
   try {
     const { stderr } = await run('soffice', [
-      `-env:UserInstallation=file://${path.join(work, 'profile')}`,
+      // A file URL, not "file://" + a path: on Windows that would be file://C:\… and invalid.
+      `-env:UserInstallation=${pathToFileURL(path.join(work, 'profile')).href}`,
       '--headless', '--norestore', '--nologo', '--nodefault',
       '--convert-to', 'pdf', '--outdir', work, inputFile,
     ], { timeoutMs, maxBytes: 1024 * 1024 });

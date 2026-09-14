@@ -549,10 +549,11 @@ const SONNET = 'claude-code:sonnet';
 const HAIKU = 'claude-code:haiku';
 const ASK = { word: { hanzi: '謝謝' }, question: 'When?' };
 
-/* The fake reads what to answer from $HOME, the one variable the app passes on
-   besides USER, LOGNAME, LANG and PATH. */
+/* The fake reads what to answer from the home folder, one of the few variables the
+   app passes on (server/lib/platform.js). */
 function usePlan(scenario) {
   process.env.HOME = PLAN_HOME;
+  process.env.USERPROFILE = PLAN_HOME;   // the home folder on Windows
   process.env.MEMOLANG_CLAUDE_BIN = FAKE_CLAUDE;
   fs.chmodSync(FAKE_CLAUDE, 0o755);
   fs.writeFileSync(path.join(PLAN_HOME, 'fake-claude.json'), JSON.stringify(scenario));

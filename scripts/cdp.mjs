@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const [,, url, out = '/tmp/cdp.png', w = '390', h = '844', ...steps] = process.argv;
+const [,, url, out = path.join(os.tmpdir(), 'cdp.png'), w = '390', h = '844', ...steps] = process.argv;
 const CH = process.env.CHROME || path.join(os.homedir(), '.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell');
 const port = 9300 + Math.floor(Math.random() * 500);
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'cdp-'));

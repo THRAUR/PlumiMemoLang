@@ -17,9 +17,10 @@
    tools anyway, the call is stopped before the model answers.
 
    Like every tool this app starts (server/lib/documents.js), it runs without a
-   shell, with a timeout, an output cap and a minimal environment: HOME (where the
-   login lives), USER, LOGNAME, LANG and PATH. Never ANTHROPIC_API_KEY: with an API
-   key in its environment the CLI bills that key instead of the plan. And never
+   shell, with a timeout, an output cap and a minimal environment (the home folder,
+   where the login lives, and what a program needs to start on this system: see
+   server/lib/platform.js). Never ANTHROPIC_API_KEY: with an API key in its
+   environment the CLI bills that key instead of the plan. And never
    OPENROUTER_API_KEY, which no child process gets.
 
    Effort, measured 2026-09-14 with Sonnet turning a six-line class note into one
@@ -28,12 +29,12 @@
    correct readings). Tasks run at low effort unless TASKS in ./tasks.js says
    otherwise. */
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { planModel } from './models.js';
 import { extractJson } from '../openrouter.js';
+import { IS_WINDOWS, findProgram, minimalEnv } from '../lib/platform.js';
 
 const BIN_TTL_MS = 30 * 1000;
 const STATUS_TTL_MS = 60 * 1000;
@@ -68,24 +69,16 @@ let limits = null;         // the plan's usage windows, from the last call that 
 
 /* Where the command lives. MEMOLANG_CLAUDE_BIN (set in .env) is the only place
    looked at when it is set, so a test pointing at a fake never reaches the real
-   one. The native installer puts `claude` in ~/.local/bin, which a pm2 service's
-   PATH does not include, so the known install places are checked before PATH. */
+   one. The native installer puts `claude` in ~/.local/bin (claude.exe on Windows),
+   which a pm2 service's PATH does not include, so the known install places are
+   checked before PATH. */
 export function findClaude() {
   if (binCache && Date.now() - binCache.at < BIN_TTL_MS) return binCache.path;
-  const forced = String(process.env.MEMOLANG_CLAUDE_BIN || '').trim();
   const home = os.homedir();
-  const candidates = forced ? [forced] : [
-    path.join(home, '.local', 'bin', 'claude'),
-    path.join(home, '.claude', 'local', 'claude'),
-    ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, 'claude')),
-  ];
-  let found = '';
-  for (const file of candidates) {
-    try {
-      fs.accessSync(file, fs.constants.X_OK);
-      if (fs.statSync(file).isFile()) { found = file; break; }
-    } catch { /* not here */ }
-  }
+  const found = findProgram('claude', {
+    envVar: 'MEMOLANG_CLAUDE_BIN',
+    prefer: [path.join(home, '.local', 'bin'), path.join(home, '.claude', 'local')],
+  });
   binCache = { at: Date.now(), path: found };
   return found;
 }
@@ -96,18 +89,17 @@ export function resetClaudeCache() {
   limits = null;
 }
 
-/* HOME is where the login lives; PATH is kept so the command finds the programs it
-   expects. Nothing else from this process's environment is passed on. */
+/* The home folder is where the login lives, PATH lets the command find the programs it
+   expects, and a Windows program also needs the system variables every program needs
+   (../lib/platform.js). Nothing else from this process's environment is passed on. */
 function childEnv() {
-  const env = {};
-  for (const name of ['HOME', 'USER', 'LOGNAME', 'LANG', 'PATH']) {
-    if (process.env[name]) env[name] = process.env[name];
-  }
-  env.HOME ||= os.homedir();
-  env.PATH ||= '/usr/local/bin:/usr/bin:/bin';
-  // A helper the learner never sees should not update itself or send reports.
-  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
-  return env;
+  const extra = {
+    // A helper the learner never sees should not update itself or send reports.
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  };
+  // Claude Code on Windows looks for Git Bash, and this variable says where it is.
+  if (IS_WINDOWS && process.env.CLAUDE_CODE_GIT_BASH_PATH) extra.CLAUDE_CODE_GIT_BASH_PATH = process.env.CLAUDE_CODE_GIT_BASH_PATH;
+  return minimalEnv(extra);
 }
 
 /* One run of the command. With `onLine`, stdout is read as lines (the stream-json
@@ -118,7 +110,10 @@ function run(bin, args, { cwd, input = '', timeoutMs = 60000, signal, onLine = n
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(bin, args, { cwd, env: childEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      // A script (the tests' fake Claude Code) runs through this Node: Windows cannot
+      // start a file by its #! line.
+      const [command, argv] = /\.[cm]?js$/i.test(bin) ? [process.execPath, [bin, ...args]] : [bin, args];
+      child = spawn(command, argv, { cwd, env: childEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     } catch (e) {
       reject(e);
       return;

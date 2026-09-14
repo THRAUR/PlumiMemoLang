@@ -16,6 +16,7 @@ const FAKE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url
 fs.chmodSync(FAKE, 0o755);
 process.env.DATA_DIR = dataDir;
 process.env.HOME = home;
+process.env.USERPROFILE = home;          // the home folder on Windows
 process.env.MEMOLANG_CLAUDE_BIN = FAKE;
 delete process.env.MEMOLANG_DATA_DIR;
 delete process.env.OPENROUTER_API_KEY;

@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /* A stand-in for the `claude` command in tests (MEMOLANG_CLAUDE_BIN points here).
-   It never touches the network. Its behaviour comes from $HOME/fake-claude.json,
-   because the app gives a child process only HOME, USER, LOGNAME, LANG and PATH.
-   Every model run is appended to $HOME/fake-claude-calls.jsonl, so a test can check
-   the flags, the environment and the message the app sent.
+   It never touches the network. Its behaviour comes from fake-claude.json in the home
+   folder, because the app passes a child process only a few variables and the home
+   folder is one of them. Every model run is appended to fake-claude-calls.jsonl next
+   to it, so a test can check the flags, the environment and the message the app sent.
+   The app starts it through Node, so it also runs on Windows.
 
    Modes: ok (default) · limit · login · badmodel · crash · nojson · slow · tools */
 import fs from 'node:fs';
 import path from 'node:path';
 
-const home = process.env.HOME || '';
+const home = process.env.HOME || process.env.USERPROFILE || '';
 let scenario = {};
 try { scenario = JSON.parse(fs.readFileSync(path.join(home, 'fake-claude.json'), 'utf8')); } catch { scenario = {}; }
 const argv = process.argv.slice(2);

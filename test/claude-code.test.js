@@ -15,6 +15,7 @@ fs.chmodSync(FAKE, 0o755);
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'plumi-claude-home-'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'plumi-claude-data-'));
 process.env.HOME = HOME;
+process.env.USERPROFILE = HOME;          // the home folder on Windows
 process.env.DATA_DIR = DATA;
 delete process.env.MEMOLANG_DATA_DIR;
 process.env.MEMOLANG_CLAUDE_BIN = FAKE;
@@ -112,7 +113,7 @@ test('claudeChat locks the command down and sends the prompt, the image and the 
   assert.equal(call.system, 'You are a Mandarin teacher. Goals: speak.', 'the system prompt travels as a file');
   assert.ok(!call.argv.some((a) => a.includes('Goals: speak')), 'and never as an argument');
   assert.deepEqual(call.envNames.filter((n) => /KEY|TOKEN|ANTHROPIC|OPENROUTER|SECRET/i.test(n)), [], 'no key reaches the command');
-  assert.ok(call.envNames.includes('HOME'), 'HOME is where the login lives');
+  assert.ok(call.envNames.includes(process.platform === 'win32' ? 'USERPROFILE' : 'HOME'), 'the home folder is where the login lives');
   const content = call.message.message.content;
   assert.deepEqual(content.map((c) => c.type), ['text', 'image'], 'a web address is not passed on');
   assert.deepEqual(content[1].source, { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' });

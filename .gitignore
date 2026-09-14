@@ -3,4 +3,7 @@ data/
 .env
 *.log
 .DS_Store
+Thumbs.db
 tmp/
+# Notes for Claude Code about one particular machine (a live instance, a staging copy)
+CLAUDE.local.md
