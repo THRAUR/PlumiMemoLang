@@ -20,7 +20,8 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "launch": "node --env-file-if-exists=.env server/index.js --open",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "express": "^5.1.0"

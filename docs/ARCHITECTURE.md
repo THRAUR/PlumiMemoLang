@@ -920,8 +920,15 @@ export function openInBrowser(url)            // an address the app built, never
 
 ### 10.4 Checks and release files
 
-- `.github/workflows/test.yml` runs `npm test` on ubuntu-latest, macos-latest and
-  windows-latest with Node 22, installing poppler first so the PDF tests run.
+- `.github/workflows/test.yml` runs on ubuntu-latest, macos-latest and windows-latest with
+  Node 22. It starts with `node scripts/smoke.mjs --launcher` on a checkout without
+  `node_modules`: the double-click launcher for that system (`start-mac.command`, plain bash,
+  stands in on Linux) has to install the packages, start the app on a spare port with a
+  throwaway data folder and try the browser, and the page, `/app.js`, `/plume.css`, a
+  `shared/` module and `/api/settings` have to answer; then everything the launcher started
+  is stopped, as closing its window would. After that come `npm ci` and `npm test`, with
+  poppler installed first so the PDF tests run.
+- `npm run smoke` makes the same check on `node server/index.js` directly.
 - `LICENSE` is MIT. The bundled fonts are under the SIL Open Font License; their licence texts
   are in `public/fonts/licenses/`.
 - Notes about one machine (a live instance, a staging copy) belong in `CLAUDE.local.md`, which

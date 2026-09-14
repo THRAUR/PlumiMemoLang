@@ -64,7 +64,8 @@ shared/          pure modules used by BOTH server and browser (zhuyin/pinyin uti
 public/          the app: index.html, plume.css (tokens), app.css (kit), js/, css/, fonts/
 public/js/views/ one module per screen; each owns a stylesheet in public/css/
 test/            node:test suites (+ fixtures: seed.json, and fake-claude.mjs standing in for Claude Code)
-scripts/         seed.mjs (fixture → running server), qa.sh (screenshot sweep), cdp.mjs (headless driver)
+scripts/         seed.mjs (fixture → running server), qa.sh (screenshot sweep), cdp.mjs (headless driver),
+                 smoke.mjs (starts the app, or a double-click launcher, and checks it answers)
 start-*.command / start-*.cmd   double-click launchers for macOS and Windows
 data/            the learner's data (gitignored): words.json, lessons.json, notes.json …
 ```

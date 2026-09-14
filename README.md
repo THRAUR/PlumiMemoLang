@@ -247,6 +247,8 @@ shadows that press down, and Plumi the bird.
 
 ```bash
 npm test                      # unit and route tests (node:test), also run on macOS, Windows and Linux in CI
+npm run smoke                 # starts the real server on a spare port and checks it serves the app
+npm run smoke -- --launcher   # the same through this system's double-click launcher, as CI does first
 npm run dev                   # restarts on server changes
 node scripts/seed.mjs http://127.0.0.1:3080   # fills a running server with sample words and lessons
 scripts/qa.sh 3098 /tmp/qa    # Linux or macOS: seeded server + screenshots of every screen

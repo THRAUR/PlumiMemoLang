@@ -14,6 +14,8 @@ jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A launcher or a browser that never lets go must not hold a runner for hours.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +27,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # A fresh download started the way a double-click starts it: the launcher for this
+      # system (start-windows.cmd, or start-mac.command, which is plain bash) installs the
+      # packages, starts the app and tries to open the browser, and the page, its first
+      # modules and the API have to answer. It runs before `npm ci`, so the launcher's own
+      # first-start install is what gets tested. See scripts/smoke.mjs.
+      - name: Start through the double-click launcher
+        run: node scripts/smoke.mjs --launcher
 
       # The PDF tests skip themselves when poppler is missing; install it so they run.
       - name: Install poppler
