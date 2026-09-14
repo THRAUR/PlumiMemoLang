@@ -33,7 +33,7 @@ const SORTS = [['score', 'Score'], ['recent', 'Recent'], ['alpha', 'A–Z'], ['d
 const SORT_DIR = { score: 'desc', recent: 'desc', alpha: 'asc', due: 'asc' };
 const POS_LABEL = Object.fromEntries(POS);
 const TYPE_LABEL = Object.fromEntries(TYPES);
-const LANG_NAMES = { en: 'English', fr: 'French', de: 'German', es: 'Spanish', ja: 'Japanese', ko: 'Korean', vi: 'Vietnamese', pt: 'Portuguese', it: 'Italian', ru: 'Russian', nl: 'Dutch', id: 'Indonesian', th: 'Thai' };
+const LANG_NAMES = { en: 'English', fr: 'French', de: 'German', es: 'Spanish', ja: 'Japanese', ko: 'Korean', pt: 'Portuguese', it: 'Italian', ru: 'Russian', nl: 'Dutch', id: 'Indonesian', th: 'Thai' };
 const FILTERS_KEY = 'pml.words.filters';
 const DEFAULT_FILTERS = { q: '', sort: 'score', lessonId: '', band: '', type: '' };
 

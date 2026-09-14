@@ -153,9 +153,14 @@ export function learnerProfile(settings) {
 }
 
 /* The languages Plumi can explain things in (settings.nativeLanguage). A third
-   element is the lang attribute for a label in its own script. */
+   element is the lang attribute for a label in its own script.
+   Vietnamese was offered until 2026-09-14 and removed: Karla, Pixelify Sans and
+   Silkscreen have no Vietnamese letters (Google Fonts publishes no Vietnamese subset
+   of them), so ọ, ở, ế and the rest came from a fallback font in the middle of every
+   word. Japanese, Korean and Thai are drawn whole by the system font, which looks
+   right. Check a new language's letters against public/fonts before adding it. */
 export const LANGUAGES = [
   ['en', 'English'], ['fr', 'Français'], ['de', 'Deutsch'], ['es', 'Español'],
   ['it', 'Italiano'], ['pt', 'Português'], ['ja', '日本語', 'ja'], ['ko', '한국어', 'ko'],
-  ['vi', 'Tiếng Việt'], ['th', 'ไทย', 'th'], ['id', 'Bahasa Indonesia'],
+  ['th', 'ไทย', 'th'], ['id', 'Bahasa Indonesia'],
 ];

@@ -682,3 +682,29 @@ test('everything written for the learner follows "Explain things in", not Englis
   assert.equal(enrich.result.meaning, 'merci');
   assert.equal(enrich.result.meaningNative, '', 'a copy of the meaning is dropped');
 });
+
+test('every language the learner can pick is named, in words, in every task', async () => {
+  const { buildMessages, languageName } = await import('../server/ai/prompts.js');
+  const { LANGUAGES } = await import('../shared/goals.js');
+  const text = (msg) => (typeof msg.content === 'string' ? msg.content : msg.content.map((c) => c.text || '').join('\n'));
+  assert.ok(!LANGUAGES.some(([code]) => code === 'vi'), 'Vietnamese stays off the list until the app fonts can draw it (shared/goals.js)');
+  for (const [code] of LANGUAGES) {
+    // The English name comes from Intl.DisplayNames. On a Node build without it the model
+    // would be told "th" instead of "Thai"; CI runs this on all three systems.
+    const name = languageName(code);
+    assert.match(name, /^[A-Z][a-z]+( [A-Z][a-z]+)*$/, `${code} → "${name}"`);
+    const learner = { nativeLanguage: code, level: 'beginner', script: 'zhuyin' };
+    const tasks = {
+      extract: [{ title: 'Class', text: '謝謝 xiè xie = thank you' }, `lesson.title — ${name}`],
+      suggest: [{ known: [] }, `meaning in ${name}`],
+      enrich: [{ word: { hanzi: '謝謝' } }, `meaning (in ${name})`],
+      explain: [{ word: { hanzi: '謝謝' }, question: 'why?' }, `Answer in ${name}`],
+      reading: [{ words: [] }, `questions in ${name}`],
+    };
+    for (const [task, [input, needle]] of Object.entries(tasks)) {
+      const [system, user] = buildMessages(task, input, learner);
+      assert.ok(system.content.includes(`The explanation language is ${name}.`), `${code} ${task}: the system prompt names ${name}`);
+      assert.ok(text(user).includes(needle), `${code} ${task}: "${needle}"`);
+    }
+  }
+});

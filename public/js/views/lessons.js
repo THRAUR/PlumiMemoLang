@@ -27,7 +27,7 @@ const POS = [
   ['interj', 'Interjection'], ['pron', 'Pronoun'], ['num', 'Number'], ['expr', 'Expression'],
 ];
 const TYPES = [['word', 'Word'], ['character', 'Character'], ['phrase', 'Phrase'], ['sentence', 'Sentence'], ['grammar', 'Grammar']];
-const LANG_NAMES = { en: 'English', fr: 'French', de: 'German', es: 'Spanish', ja: 'Japanese', ko: 'Korean', vi: 'Vietnamese', pt: 'Portuguese', it: 'Italian', ru: 'Russian', nl: 'Dutch', id: 'Indonesian', th: 'Thai' };
+const LANG_NAMES = { en: 'English', fr: 'French', de: 'German', es: 'Spanish', ja: 'Japanese', ko: 'Korean', pt: 'Portuguese', it: 'Italian', ru: 'Russian', nl: 'Dutch', id: 'Indonesian', th: 'Thai' };
 const KIND_LABEL = { vocab: 'Vocabulary', grammar: 'Grammar', dialogue: 'Dialogue', culture: 'Culture', tip: 'Tip', text: 'Notes' };
 
 function nativeLabel() { return LANG_NAMES[settings?.nativeLanguage] || settings?.nativeLanguage || 'native language'; }

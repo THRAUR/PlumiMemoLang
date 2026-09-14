@@ -871,6 +871,10 @@ for everything the AI writes for the learner:
   `runTask()` drops a `meaningNative` that only repeats `meaning`.
 - Content generated earlier stays as it was: importing merges into existing words and only fills
   empty fields, so re-importing a note does not translate a stored meaning.
+- The languages offered (`LANGUAGES` in `shared/goals.js`) are English, French, German, Spanish,
+  Italian, Portuguese, Japanese, Korean, Thai and Indonesian, and a test builds every task's
+  prompt for each one. Vietnamese was removed: the app's fonts have no Vietnamese letters, so its
+  words mixed two fonts. Japanese, Korean and Thai are drawn whole by the system font.
 
 ## 10. macOS, Windows and Linux, and a public repository (2026-09-14)
 
